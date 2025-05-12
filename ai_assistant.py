@@ -8,7 +8,7 @@ class AI_Request(BaseModel):
     temperature: float = 0.7  # Default temperature
 
 # DeepSeek model functions remain the same as before
-def deepseek_chat(request: AI_Request, openai_client: OpenAI):
+def deepseek_chat(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
     system_prompt = """
     I want you to act as a AI assistant that answers the user's prompt in a friendly and helpful manner.
     
@@ -18,7 +18,7 @@ def deepseek_chat(request: AI_Request, openai_client: OpenAI):
     - Maintain conversational tone
     """
     try:
-        openai_response = openai_client.chat.completions.create(
+        deepseek_response = deepseek_client.chat.completions.create(
             model="deepseek-chat",
             messages=[
                 {"role": "system", "content": system_prompt.strip()},
@@ -26,12 +26,12 @@ def deepseek_chat(request: AI_Request, openai_client: OpenAI):
             ],
             temperature=request.temperature
         )
-        return {"answer": openai_response.choices[0].message.content}
+        return {"answer": deepseek_response.choices[0].message.content}
     except Exception as e:
         print(f"OpenAI API error: {str(e)}")
         return {"answer": "I encountered an error while processing your question."}
 
-def deepseek_reasoner(request: AI_Request, openai_client: OpenAI):
+def deepseek_reasoner(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
     system_prompt = """
     I want you to act as a reasoning-focused AI assistant.
     
@@ -42,7 +42,7 @@ def deepseek_reasoner(request: AI_Request, openai_client: OpenAI):
     - Include logical frameworks
     """
     try:
-        openai_response = openai_client.chat.completions.create(
+        openai_response = deepseek_client.chat.completions.create(
             model="deepseek-reasoner",
             messages=[
                 {"role": "system", "content": system_prompt.strip()},
@@ -55,7 +55,7 @@ def deepseek_reasoner(request: AI_Request, openai_client: OpenAI):
         print(f"OpenAI API error: {str(e)}")
         return {"answer": "I encountered an error while processing your question."}
 
-def gpt_models(request: AI_Request, openai_client: OpenAI):
+def gpt_models(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
     """Handle all GPT model requests with dynamic model selection"""
     print(f"Received request for model: {request.model}")
     # Validate the model name
@@ -105,7 +105,7 @@ MODEL_FUNCTIONS = {
     "gpt-4o-mini": gpt_models
 }
 
-def ask_ai(request: AI_Request, openai_client: OpenAI):
+def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
     """Route to the appropriate model function"""
     try:
         if request.model not in MODEL_FUNCTIONS:
@@ -116,7 +116,7 @@ def ask_ai(request: AI_Request, openai_client: OpenAI):
         # Ensure temperature is within valid range (0-2)
         request.temperature = max(0.0, min(2.0, request.temperature))
         
-        return MODEL_FUNCTIONS[request.model](request, openai_client)
+        return MODEL_FUNCTIONS[request.model](request, openai_client, deepseek_client)
     except Exception as e:
         print(f"Error in AI processing: {str(e)}")
         return {"answer": f"System error: {str(e)}"}

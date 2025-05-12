@@ -4,14 +4,18 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from email_assistant import rewrite_email, EmailRequest
 from ai_assistant import ask_ai, AI_Request
+import os
 
 load_dotenv()
 
 # FastAPI app initialization
 app = FastAPI()
 
-# OpenAI client initialization
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+
+# AI client initialization
 openai_client = OpenAI()
+deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com/v1")
 
 # CORS configuration
 origins = ["*"]
@@ -38,6 +42,6 @@ async def email_assistant_endpoint(request: EmailRequest):
 @app.post("/ask_ai")
 async def ask_ai_endpoint(request: AI_Request):
     try:
-        return ask_ai(request, openai_client)
+        return ask_ai(request, openai_client, deepseek_client)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
