@@ -36,5 +36,6 @@ uvicorn main:app --reload
 
 → API docs at http://localhost:8000/docs
 
-🔗 Frontend Integration: Configure the frontend to point to http://localhost:8000.
+🔗 Frontend Integration: Configure the frontend to point to http://localhost:8000
+
 <a href="https://github.com/SebuBergman/AI_assistant_frontend">AI front-end</a>
