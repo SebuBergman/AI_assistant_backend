@@ -1,17 +1,14 @@
-Backend Repository (FastAPI + Python)
-📌 Project Name: GenAI Email Assistant & AI Chat Backend
-🚀 Description:
+Backend Repository (FastAPI + Python)<br>
+📌 Project Name: GenAI Email Assistant & AI Chat Backend<br>
+🚀 Description:<br>
 FastAPI-powered backend for email tone transformation (professional, friendly, persuasive) and a multi-model AI assistant. Features advanced prompt engineering, OpenAI integration, and dynamic model selection.
 
-🛠️ Tech Stack:
-
-Python + FastAPI
-
-OpenAI API
-
+🛠️ Tech Stack:<br>
+Python + FastAPI<br>
+OpenAI API<br>
 RESTful API Design
 
-🧰 Getting Started:
+🧰 Getting Started:<br>
 ‼️ Prerequisites: Python 3.9+ and venv
 
 Clone the repo:
