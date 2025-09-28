@@ -54,6 +54,30 @@ def deepseek_reasoner(request: AI_Request, openai_client: OpenAI, deepseek_clien
     except Exception as e:
         print(f"OpenAI API error: {str(e)}")
         return {"answer": "I encountered an error while processing your question."}
+    
+def claude_code_assistant(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
+    system_prompt = """
+    I want you to act as a programming-focused AI assistant.
+    
+    Rules:
+    - Focus on code completion and debugging
+    - Provide clear code examples
+    - Be precise
+    - Be concise
+    """
+    try:
+        claude_response = anthropic_client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=1000,
+            messages=[
+                {"role": "system", "content": system_prompt.strip()},
+                {"role": "user", "content": request.question}
+            ]
+        )
+        return {"answer": claude_response.content[0].text}
+    except Exception as e:
+        print(f"Claude API error: {str(e)}")
+        return {"answer": "I encountered an error while processing your question."}
 
 def gpt_models(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
     """Handle all GPT model requests with dynamic model selection"""
@@ -102,10 +126,11 @@ MODEL_FUNCTIONS = {
     "gpt-4.1-mini": gpt_models,
     "gpt-4-nano": gpt_models,
     "gpt-4o": gpt_models,
-    "gpt-4o-mini": gpt_models
+    "gpt-4o-mini": gpt_models,
+    "claude-code-assistant": claude_code_assistant
 }
 
-def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
+def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
     """Route to the appropriate model function"""
     try:
         if request.model not in MODEL_FUNCTIONS:
@@ -116,7 +141,7 @@ def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
         # Ensure temperature is within valid range (0-2)
         request.temperature = max(0.0, min(2.0, request.temperature))
         
-        return MODEL_FUNCTIONS[request.model](request, openai_client, deepseek_client)
+        return MODEL_FUNCTIONS[request.model](request, openai_client, deepseek_client, anthropic_client)
     except Exception as e:
         print(f"Error in AI processing: {str(e)}")
         return {"answer": f"System error: {str(e)}"}
