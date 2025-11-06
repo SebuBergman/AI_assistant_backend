@@ -2,13 +2,15 @@ from openai import OpenAI
 from pydantic import BaseModel
 from typing import Dict
 
+from tools import get_weather
+
 class AI_Request(BaseModel):
     question: str
     model: str
     temperature: float = 0.7  # Default temperature
 
 # DeepSeek model functions remain the same as before
-def deepseek_chat(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
+def deepseek_chat(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
     system_prompt = """
     I want you to act as a AI assistant that answers the user's prompt in a friendly and helpful manner.
     
@@ -31,7 +33,7 @@ def deepseek_chat(request: AI_Request, openai_client: OpenAI, deepseek_client: O
         print(f"OpenAI API error: {str(e)}")
         return {"answer": "I encountered an error while processing your question."}
 
-def deepseek_reasoner(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
+def deepseek_reasoner(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
     system_prompt = """
     I want you to act as a reasoning-focused AI assistant.
     
@@ -55,8 +57,23 @@ def deepseek_reasoner(request: AI_Request, openai_client: OpenAI, deepseek_clien
         print(f"OpenAI API error: {str(e)}")
         return {"answer": "I encountered an error while processing your question."}
     
-def claude_code_assistant(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
-    system_prompt = """
+def claude_models(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
+    """Handle Claude Code Assistant requests with dynamic model selection"""
+    print(f"Received request for model: {request.model}")
+    # Validate the model name
+    valid_claude_models = {
+    "claude-4.5-sonnet": "Claude Sonnet 4.5 (Next-gen Sonnet tier: high throughput, production workloads with strong coding & reasoning) ",
+    "claude-4.1-opus": "Claude Opus 4.1 (Top-tier flagship: complex reasoning, long context, full-agent capability and highest accuracy) ",
+    "claude-3.5-haiku": "Claude 3.5 Haiku (Fast and cost-efficient; good for everyday queries, moderation & translation)",
+    "claude-3.5-sonnet": "Claude 3.5 Sonnet (Balanced performance and cost; capable of deeper reasoning & data tasks)",
+    "claude-3.7-sonnet": "Claude 3.7 Sonnet (Hybrid reasoning mode: choose speed vs depth; advanced coding and agent workflows) ",
+    }
+
+    if request.model not in valid_claude_models:
+        return {"answer": f"Error: Unsupported GPT model '{request.model}'"}
+
+    system_prompt = f"""
+    You are {valid_claude_models[request.model]}.
     I want you to act as a programming-focused AI assistant.
     
     Rules:
@@ -67,28 +84,31 @@ def claude_code_assistant(request: AI_Request, openai_client: OpenAI, deepseek_c
     """
     try:
         claude_response = anthropic_client.messages.create(
-            model="claude-3-haiku-20240307",
+            model=request.model,  # Dynamic model selection
             max_tokens=1000,
+            system=system_prompt.strip(),
             messages=[
-                {"role": "system", "content": system_prompt.strip()},
                 {"role": "user", "content": request.question}
-            ]
+            ],
+            temperature=request.temperature  # Dynamic temperature
         )
         return {"answer": claude_response.content[0].text}
     except Exception as e:
-        print(f"Claude API error: {str(e)}")
+        print(f"OpenAI API error with model {request.model}: {str(e)}")
         return {"answer": "I encountered an error while processing your question."}
 
-def gpt_models(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI):
+def gpt_models(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
     """Handle all GPT model requests with dynamic model selection"""
     print(f"Received request for model: {request.model}")
     # Validate the model name
     valid_gpt_models = {
+        "gpt-5": "GPT-5 (Advanced reasoning and creativity with expert-level responses)",
+        "gpt-5-mini": "GPT-5 Mini (Fast, efficient, and concise with solid reasoning)",
+        "gpt-5-nano": "GPT-5 Nano (Ultra-light, delivers brief 1–2 sentence answers)",
         "gpt-4.1": "GPT-4.1 (Comprehensive answers with professional tone)",
         "gpt-4.1-mini": "GPT-4.1 Mini (Concise but informative responses)",
-        "gpt-4-nano": "GPT-4 Nano (Very short 1-2 sentence answers)",
+        "gpt-4.1-nano": "GPT-4.1 Nano (Very short 1-2 sentence answers)",
         "gpt-4o": "GPT-4o (Sophisticated, nuanced responses)",
-        "gpt-4o-mini": "GPT-4o Mini (Balanced depth and efficiency)"
     }
     
     if request.model not in valid_gpt_models:
@@ -112,6 +132,7 @@ def gpt_models(request: AI_Request, openai_client: OpenAI, deepseek_client: Open
                 {"role": "system", "content": system_prompt.strip()},
                 {"role": "user", "content": request.question}
             ],
+            tools=[get_weather],
             temperature=request.temperature  # Dynamic temperature
         )
         return {"answer": openai_response.choices[0].message.content}
@@ -122,13 +143,20 @@ def gpt_models(request: AI_Request, openai_client: OpenAI, deepseek_client: Open
 MODEL_FUNCTIONS = {
     "deepseek-chat": deepseek_chat,
     "deepseek-reasoner": deepseek_reasoner,
+    "gpt-5": gpt_models,
+    "gpt-5-mini": gpt_models,
+    "gpt-5-nano": gpt_models,
     "gpt-4.1": gpt_models,
     "gpt-4.1-mini": gpt_models,
-    "gpt-4-nano": gpt_models,
+    "gpt-4.1-nano": gpt_models,
     "gpt-4o": gpt_models,
-    "gpt-4o-mini": gpt_models,
-    "claude-code-assistant": claude_code_assistant
+    "claude-3.5-haiku": claude_models,
+    "claude-3.5-sonnet": claude_models,
+    "claude-3.7-sonnet": claude_models,
+    "claude-4.5-sonnet": claude_models,
+    "claude-4.1-opus": claude_models,
 }
+
 
 def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
     """Route to the appropriate model function"""
