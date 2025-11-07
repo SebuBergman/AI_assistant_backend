@@ -11,7 +11,10 @@ def get_weather(city_name, api_key):
       dict: Weather information including temperature, description, etc., or error message.
     """
 
-    base_url = "https://api.openweathermap.org/data/3.0/weather"
+    if not api_key:
+        return {"error": "Missing API key."}
+
+    base_url = "https://api.openweathermap.org/data/2.5/weather"
     params={
         "q": city_name,
         "appid": api_key,
@@ -35,3 +38,27 @@ def get_weather(city_name, api_key):
         return weather
     except requests.RequestException as e:
         return {"error": str(e)}
+
+ALL_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a given city.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "The name of the city to get weather for."
+                    }
+                },
+                "required": ["location"]
+            }
+        }
+    }
+]
+
+TOOL_FUNCTIONS = {
+    "get_weather": get_weather
+}
