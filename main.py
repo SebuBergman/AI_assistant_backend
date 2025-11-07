@@ -6,9 +6,10 @@ from email_assistant import rewrite_email, EmailRequest
 from ai_assistant import ask_ai, AI_Request
 from anthropic import Anthropic
 from pydantic import BaseModel
-from typing import AsyncGenerator
+from fastapi.responses import StreamingResponse
 import os
 import uvicorn
+import json
 
 load_dotenv()
 
@@ -27,7 +28,7 @@ anthropic_client = Anthropic(api_key=CLAUDE_API_KEY)
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,7 +38,7 @@ class ChatRequest(BaseModel):
     model: str
     prompt: str
     temperature: float = 0.7
-    max_tokens: int = 1000
+    max_tokens: int = 1024
 
 @app.get("/")
 def read_root():
@@ -52,10 +53,52 @@ async def email_assistant_endpoint(request: EmailRequest):
 
 @app.post("/ask_ai")
 async def ask_ai_endpoint(request: AI_Request):
-    try:
-        return ask_ai(request, openai_client, deepseek_client, anthropic_client)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Unified streaming generator that wraps ai_assistant functions"""
+    
+    async def generate():
+        try:
+            # Get the streaming generator from ask_ai_stream
+            stream = ask_ai(
+                request,
+                openai_client,
+                deepseek_client,
+                anthropic_client
+            )
+
+            # Stream the content with SSE formatting
+            for chunk in stream:
+                # Handle both string chunks and JSON chunks (for reasoner)
+                if isinstance(chunk, str):
+                    if chunk.startswith('{'):
+                        # Already JSON formatted (from deepseek-reasoner)
+                        yield f"data: {chunk}\n\n"
+                    else:
+                        # Plain text content
+                        yield f"data: {json.dumps({'content': chunk})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'content': str(chunk)})}\n\n"
+            
+            # Send completion signal
+            yield f"data: {json.dumps({'done': True})}\n\n"
+
+        except Exception as e:
+            print(f"Streaming error: {str(e)}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
+    
+@app.get("/api/models")
+async def list_models():
+    """Get list of available models"""
+    from ai_assistant import MODEL_FUNCTIONS
+    return {"models": list(MODEL_FUNCTIONS.keys())}
 
 def main():
     """Main function to run the FastAPI application with uvicorn server."""
