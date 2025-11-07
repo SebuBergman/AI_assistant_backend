@@ -1,16 +1,20 @@
 from openai import OpenAI
 from pydantic import BaseModel
 from typing import Dict
+from typing import AsyncGenerator
+import json
 
-from tools import get_weather
+from tools import ALL_TOOLS, TOOL_FUNCTIONS
 
 class AI_Request(BaseModel):
     question: str
     model: str
     temperature: float = 0.7  # Default temperature
+    max_tokens: int = 1024  # Default max tokens
 
 # DeepSeek model functions remain the same as before
-def deepseek_chat(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
+def deepseek_chat_stream(request: AI_Request, **kwargs) -> AsyncGenerator:
+    client = kwargs.get('deepseek_client')
     system_prompt = """
     I want you to act as a AI assistant that answers the user's prompt in a friendly and helpful manner.
     
@@ -20,20 +24,24 @@ def deepseek_chat(request: AI_Request, openai_client: OpenAI, deepseek_client: O
     - Maintain conversational tone
     """
     try:
-        deepseek_response = deepseek_client.chat.completions.create(
+        stream = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
                 {"role": "system", "content": system_prompt.strip()},
                 {"role": "user", "content": request.question}
             ],
-            temperature=request.temperature
+            temperature=request.temperature,
+            stream=True
         )
-        return {"answer": deepseek_response.choices[0].message.content}
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
     except Exception as e:
-        print(f"OpenAI API error: {str(e)}")
+        print(f"DeepSeek chat error: {str(e)}")
         return {"answer": "I encountered an error while processing your question."}
 
-def deepseek_reasoner(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
+def deepseek_reasoner_stream(request: AI_Request, **kwargs) -> AsyncGenerator:
+    client = kwargs.get('deepseek_client')
     system_prompt = """
     I want you to act as a reasoning-focused AI assistant.
     
@@ -44,21 +52,37 @@ def deepseek_reasoner(request: AI_Request, openai_client: OpenAI, deepseek_clien
     - Include logical frameworks
     """
     try:
-        openai_response = deepseek_client.chat.completions.create(
+        stream = client.chat.completions.create(
             model="deepseek-reasoner",
             messages=[
                 {"role": "system", "content": system_prompt.strip()},
                 {"role": "user", "content": request.question}
             ],
+            stream=True,
             temperature=request.temperature
         )
-        return {"answer": openai_response.choices[0].message.content}
+        
+        for chunk in stream:
+            # Handle reasoning content
+            if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content:
+                yield json.dumps({
+                    "type": "reasoning",
+                    "content": chunk.choices[0].delta.reasoning_content
+                }) + "\n"
+
+            # Handle regular content
+            if chunk.choices[0].delta.content:
+                yield json.dumps({
+                    "type": "content",
+                    "content": chunk.choices[0].delta.content
+                }) + "\n"
     except Exception as e:
         print(f"OpenAI API error: {str(e)}")
         return {"answer": "I encountered an error while processing your question."}
     
-def claude_models(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
+def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator:
     """Handle Claude Code Assistant requests with dynamic model selection"""
+    client = kwargs.get('anthropic_client')
     print(f"Received request for model: {request.model}")
     # Validate the model name
     valid_claude_models = {
@@ -83,22 +107,23 @@ def claude_models(request: AI_Request, openai_client: OpenAI, deepseek_client: O
     - Be concise
     """
     try:
-        claude_response = anthropic_client.messages.create(
-            model=request.model,  # Dynamic model selection
-            max_tokens=1000,
-            system=system_prompt.strip(),
+        with client.messages.stream(
+            model=request.model,
             messages=[
+                {"role": "system", "content": system_prompt.strip()},
                 {"role": "user", "content": request.question}
             ],
-            temperature=request.temperature  # Dynamic temperature
-        )
-        return {"answer": claude_response.content[0].text}
+            temperature=request.temperature,
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
     except Exception as e:
         print(f"OpenAI API error with model {request.model}: {str(e)}")
         return {"answer": "I encountered an error while processing your question."}
 
-def gpt_models(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
+def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator:
     """Handle all GPT model requests with dynamic model selection"""
+    client = kwargs.get('openai_client')
     print(f"Received request for model: {request.model}")
     # Validate the model name
     valid_gpt_models = {
@@ -116,7 +141,8 @@ def gpt_models(request: AI_Request, openai_client: OpenAI, deepseek_client: Open
 
     # System prompt tailored for GPT models
     system_prompt = f"""
-    You are {valid_gpt_models[request.model]}. Provide the best possible answer to the user's question.
+    You are {valid_gpt_models[request.model]}.
+    Provide the best possible answer to the user's question.
     
     Guidelines:
     - Respond to the user's query appropriately for your model type
@@ -124,52 +150,72 @@ def gpt_models(request: AI_Request, openai_client: OpenAI, deepseek_client: Open
     - Adapt to the user's requested temperature: {request.temperature}
     - Be helpful and accurate
     """
+
+    supports_tools = not any(x in request.model for x in ["nano", "mini"])
     
     try:
-        openai_response = openai_client.chat.completions.create(
-            model=request.model,  # Dynamic model selection
-            messages=[
+        kwargs = {
+            "model": request.model,
+            "messages": [
                 {"role": "system", "content": system_prompt.strip()},
                 {"role": "user", "content": request.question}
             ],
-            tools=[get_weather],
-            temperature=request.temperature  # Dynamic temperature
-        )
-        return {"answer": openai_response.choices[0].message.content}
+            "temperature": request.temperature,
+            "stream": True
+        }
+
+        if supports_tools:
+            kwargs["tools"] = ALL_TOOLS
+
+        stream = client.chat.completions.create(**kwargs)
+
+        # ✅ Stream only if stream is iterable
+        if not stream:
+            yield {"answer": "No response stream received from the API."}
+            return
+
+        for chunk in stream:
+            if hasattr(chunk.choices[0].delta, "content") and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
     except Exception as e:
         print(f"OpenAI API error with model {request.model}: {str(e)}")
-        return {"answer": "I encountered an error while processing your question."}
+        yield {"answer": "I encountered an error while processing your question."}
 
 MODEL_FUNCTIONS = {
-    "deepseek-chat": deepseek_chat,
-    "deepseek-reasoner": deepseek_reasoner,
-    "gpt-5": gpt_models,
-    "gpt-5-mini": gpt_models,
-    "gpt-5-nano": gpt_models,
-    "gpt-4.1": gpt_models,
-    "gpt-4.1-mini": gpt_models,
-    "gpt-4.1-nano": gpt_models,
-    "gpt-4o": gpt_models,
-    "claude-3.5-haiku": claude_models,
-    "claude-3.5-sonnet": claude_models,
-    "claude-3.7-sonnet": claude_models,
-    "claude-4.5-sonnet": claude_models,
-    "claude-4.1-opus": claude_models,
+    "deepseek-chat": deepseek_chat_stream,
+    "deepseek-reasoner": deepseek_reasoner_stream,
+    "gpt-5": gpt_models_stream,
+    "gpt-5-mini": gpt_models_stream,
+    "gpt-5-nano": gpt_models_stream,
+    "gpt-4.1": gpt_models_stream,
+    "gpt-4.1-mini": gpt_models_stream,
+    "gpt-4.1-nano": gpt_models_stream,
+    "gpt-4o": gpt_models_stream,
+    "claude-3.5-haiku": claude_models_stream,
+    "claude-3.5-sonnet": claude_models_stream,
+    "claude-3.7-sonnet": claude_models_stream,
+    "claude-4.5-sonnet": claude_models_stream,
+    "claude-4.1-opus": claude_models_stream,
 }
 
-
 def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
-    """Route to the appropriate model function"""
+    """Route to the appropriate model function (streaming version)"""
     try:
         if request.model not in MODEL_FUNCTIONS:
             print(f"Unsupported model: {request.model}")
             raise ValueError(f"Unsupported model: {request.model}")
         
-        print(f"Processing request with model: {request.model}")
-        # Ensure temperature is within valid range (0-2)
+        print(f"Processing streaming request with model: {request.model}")
         request.temperature = max(0.0, min(2.0, request.temperature))
         
-        return MODEL_FUNCTIONS[request.model](request, openai_client, deepseek_client, anthropic_client)
+        # Return the generator directly for streaming
+        return MODEL_FUNCTIONS[request.model](
+            request, 
+            openai_client=openai_client, 
+            deepseek_client=deepseek_client, 
+            anthropic_client=anthropic_client
+        )
     except Exception as e:
-        print(f"Error in AI processing: {str(e)}")
-        return {"answer": f"System error: {str(e)}"}
+        print(f"Error in AI streaming: {str(e)}")
+        raise
