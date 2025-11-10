@@ -24,6 +24,7 @@ def get_weather(city_name, api_key):
         response = requests.get(base_url, params=params, timeout=5)
         response.raise_for_status()
         data = response.json()
+        print(data)
         if data.get('cod') != 200:
             return {"error": data.get("message", "Unknown error")}
         
