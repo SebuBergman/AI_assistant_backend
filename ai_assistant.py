@@ -11,7 +11,7 @@ class AI_Request(BaseModel):
     question: str
     model: str
     temperature: float = 1  # Default temperature
-    max_tokens: int = 1024  # Default max tokens
+    max_tokens: int = 2048  # Default max tokens
 
 # DeepSeek model functions remain the same as before
 def deepseek_chat_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: ignore
@@ -87,8 +87,8 @@ def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
     print(f"Received request for model: {request.model}")
     # Validate the model name
     valid_claude_models = {
-    "claude-4.5-sonnet": "Claude Sonnet 4.5 (Next-gen Sonnet tier: high throughput, production workloads with strong coding & reasoning) ",
-    "claude-4.1-opus": "Claude Opus 4.1 (Top-tier flagship: complex reasoning, long context, full-agent capability and highest accuracy) ",
+    "claude-sonnet-4-5": "Claude Sonnet 4.5 (Next-gen Sonnet tier: high throughput, production workloads with strong coding & reasoning) ",
+    "claude-opus-4-1": "Claude Opus 4.1 (Top-tier flagship: complex reasoning, long context, full-agent capability and highest accuracy) ",
     "claude-3.5-haiku": "Claude 3.5 Haiku (Fast and cost-efficient; good for everyday queries, moderation & translation)",
     "claude-3.5-sonnet": "Claude 3.5 Sonnet (Balanced performance and cost; capable of deeper reasoning & data tasks)",
     "claude-3.7-sonnet": "Claude 3.7 Sonnet (Hybrid reasoning mode: choose speed vs depth; advanced coding and agent workflows) ",
@@ -111,10 +111,10 @@ def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
         with client.messages.stream(
             model=request.model,
             messages=[
-                {"role": "system", "content": system_prompt.strip()},
                 {"role": "user", "content": request.question}
             ],
             temperature=request.temperature,
+            max_tokens=request.max_tokens,
         ) as stream:
             for text in stream.text_stream:
                 yield text
@@ -299,8 +299,8 @@ MODEL_FUNCTIONS = {
     "claude-3.5-haiku": claude_models_stream,
     "claude-3.5-sonnet": claude_models_stream,
     "claude-3.7-sonnet": claude_models_stream,
-    "claude-4.5-sonnet": claude_models_stream,
-    "claude-4.1-opus": claude_models_stream,
+    "claude-sonnet-4-5": claude_models_stream,
+    "claude-opus-4-1": claude_models_stream,
 }
 
 def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
