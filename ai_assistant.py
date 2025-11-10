@@ -170,6 +170,9 @@ def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: 
         while iteration < max_iterations:
             iteration += 1
 
+            if request.model == "gpt-5" or request.model == "gpt-5-mini" or request.model == "gpt-5-nano":
+                request.temperature = 1.0  # Fixed temperature for GPT-5 variants
+
             # Prepare API call parameters
             api_kwargs = {
                 "model": request.model,
