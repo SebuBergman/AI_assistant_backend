@@ -5,6 +5,7 @@ from typing import AsyncGenerator
 import json
 import os
 
+from data import valid_gpt_models, valid_claude_models
 from tools import ALL_TOOLS, TOOL_FUNCTIONS
 
 class AI_Request(BaseModel):
@@ -86,27 +87,10 @@ def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
     client = kwargs.get('anthropic_client')
     print(f"Received request for model: {request.model}")
     # Validate the model name
-    valid_claude_models = {
-    "claude-sonnet-4-5": "Claude Sonnet 4.5 (Next-gen Sonnet tier: high throughput, production workloads with strong coding & reasoning) ",
-    "claude-opus-4-1": "Claude Opus 4.1 (Top-tier flagship: complex reasoning, long context, full-agent capability and highest accuracy) ",
-    "claude-3.5-haiku": "Claude 3.5 Haiku (Fast and cost-efficient; good for everyday queries, moderation & translation)",
-    "claude-3.5-sonnet": "Claude 3.5 Sonnet (Balanced performance and cost; capable of deeper reasoning & data tasks)",
-    "claude-3.7-sonnet": "Claude 3.7 Sonnet (Hybrid reasoning mode: choose speed vs depth; advanced coding and agent workflows) ",
-    }
-
+    
     if request.model not in valid_claude_models:
         return {"answer": f"Error: Unsupported GPT model '{request.model}'"}
 
-    system_prompt = f"""
-    You are {valid_claude_models[request.model]}.
-    I want you to act as a programming-focused AI assistant.
-    
-    Rules:
-    - Focus on code completion and debugging
-    - Provide clear code examples
-    - Be precise
-    - Be concise
-    """
     try:
         with client.messages.stream(
             model=request.model,
@@ -127,15 +111,6 @@ def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: 
     client = kwargs.get('openai_client')
     print(f"Received request for model: {request.model}")
     # Validate the model name
-    valid_gpt_models = {
-        "gpt-5": "GPT-5 (Advanced reasoning and creativity with expert-level responses)",
-        "gpt-5-mini": "GPT-5 Mini (Fast, efficient, and concise with solid reasoning)",
-        "gpt-5-nano": "GPT-5 Nano (Ultra-light, delivers brief 1–2 sentence answers)",
-        "gpt-4.1": "GPT-4.1 (Comprehensive answers with professional tone)",
-        "gpt-4.1-mini": "GPT-4.1 Mini (Concise but informative responses)",
-        "gpt-4.1-nano": "GPT-4.1 Nano (Very short 1-2 sentence answers)",
-        "gpt-4o": "GPT-4o (Sophisticated, nuanced responses)",
-    }
     
     if request.model not in valid_gpt_models:
         yield f"Error: Unsupported GPT model '{request.model}'"
@@ -296,9 +271,9 @@ MODEL_FUNCTIONS = {
     "gpt-4.1-mini": gpt_models_stream,
     "gpt-4.1-nano": gpt_models_stream,
     "gpt-4o": gpt_models_stream,
-    "claude-3.5-haiku": claude_models_stream,
-    "claude-3.5-sonnet": claude_models_stream,
-    "claude-3.7-sonnet": claude_models_stream,
+    "claude-3-5-haiku-latest": claude_models_stream,
+    "claude-3-5-sonnet-latest": claude_models_stream,
+    "claude-3-7-sonnet-latest": claude_models_stream,
     "claude-sonnet-4-5": claude_models_stream,
     "claude-opus-4-1": claude_models_stream,
 }
