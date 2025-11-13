@@ -15,3 +15,20 @@ valid_claude_models = {
   "claude-3-5-sonnet-latest": "Claude 3.5 Sonnet (Balanced performance and cost; capable of deeper reasoning & data tasks)",
   "claude-3-7-sonnet-latest": "Claude 3.7 Sonnet (Hybrid reasoning mode: choose speed vs depth; advanced coding and agent workflows) ",
 }
+
+support_tools = {
+  "deepseek-reasoner" : "false",
+  "deepseek-chat" : "true",
+  "gpt-5" : "true",
+  "gpt-5-mini" : "false",
+  "gpt-5-nano" : "false",
+  "gpt-4.1" : "true",
+  "gpt-4.1-mini" : "false",
+  "gpt-4.1-nano" : "false",
+  "gpt-4o" : "true",
+  "claude-sonnet-4-5": "true",
+  "claude-opus-4-1": "true",
+  "claude-3-5-haiku-latest": "true",
+  "claude-3-5-sonnet-latest": "true",
+  "claude-3-7-sonnet-latest": "true",
+}
