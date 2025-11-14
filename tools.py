@@ -1,5 +1,17 @@
 import requests
 from tavily import TavilyClient
+from data import supports_tools
+
+def is_tool_supported(model_name):
+    """Check if the given model supports tool usage.
+
+    Args:
+        model_name (str): The name of the model to check.
+
+    Returns:
+        bool: True if the model supports tools, False otherwise.
+    """
+    return model_name in supports_tools
 
 def get_weather(city_name, api_key):
     """Fetch weather data for a given city.

@@ -6,7 +6,7 @@ import json
 import os
 
 from data import valid_gpt_models, valid_claude_models
-from tools import ALL_TOOLS, TOOL_FUNCTIONS
+from tools import ALL_TOOLS, TOOL_FUNCTIONS, is_tool_supported
 
 class AI_Request(BaseModel):
     question: str
@@ -129,7 +129,13 @@ def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: 
     """
 
     # Nano and mini models don't support tools
-    supports_tools = not any(x in request.model for x in ["nano", "mini"])
+    if is_tool_supported(request.model):
+        supports_tools = True
+        print(f"Model {request.model} supports tools.")
+        
+    else:
+        supports_tools = False
+        print(f"Model {request.model} does NOT support tools.")
     
     # Initialize conversation messages
     messages = [
