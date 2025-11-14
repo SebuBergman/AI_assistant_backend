@@ -1,5 +1,8 @@
 import requests
 from tavily import TavilyClient
+from langchain_core.tools import tool
+import os
+
 from data import supports_tools
 
 def is_tool_supported(model_name):
@@ -13,7 +16,37 @@ def is_tool_supported(model_name):
     """
     return model_name in supports_tools
 
-def get_weather(city_name, api_key):
+@tool
+def weather_tool(location: str) -> dict:
+    """Get the current weather for a given city.
+    
+    Args:
+        location: The name of the city to get weather for (e.g., "Helsinki", "New York").
+    
+    Returns:
+        Weather information including temperature, description, humidity, and wind speed.
+    """
+    api_key = os.getenv("OPENWEATHER_API_KEY")
+    return get_weather(location, api_key)
+
+@tool
+def search_tool(query: str, max_results: int = 5) -> dict:
+    """Search the web for current information on any topic.
+    
+    Use this when you need up-to-date information, facts, news, or answers to questions
+    that require current data beyond your knowledge cutoff.
+
+    Args:
+        query: The search query. Be specific and clear about what information you're looking for.
+        max_results: Maximum number of search results to return (default: 5, max: 10).
+    
+    Returns:
+        Search results containing titles, URLs, content snippets, and relevance scores.
+    """
+    api_key = os.getenv("TAVILY_API_KEY")
+    return web_search(query, api_key, max_results)
+
+def get_weather(city_name: str, api_key):
     """Fetch weather data for a given city.
 
     Args:
@@ -145,3 +178,5 @@ TOOL_FUNCTIONS = {
     "get_weather": get_weather,
     "web_search": web_search
 }
+
+LANGCHAIN_TOOLS = [weather_tool, search_tool]

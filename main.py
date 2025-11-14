@@ -11,6 +11,8 @@ import os
 import uvicorn
 import json
 
+from tools import is_tool_supported
+
 load_dotenv()
 
 # FastAPI app initialization
@@ -18,12 +20,12 @@ app = FastAPI()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 # AI client initialization
 openai_client = OpenAI()
 deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com/v1")
-anthropic_client = Anthropic(api_key=CLAUDE_API_KEY)
+anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # CORS configuration
 app.add_middleware(
@@ -57,7 +59,7 @@ async def ask_ai_endpoint(request: AI_Request):
     
     async def generate():
         try:
-            # Get the streaming generator from ask_ai_stream
+            # Get the streaming generator from ask_ai
             stream = ask_ai(
                 request,
                 openai_client,
@@ -100,8 +102,18 @@ async def list_models():
     from ai_assistant import MODEL_FUNCTIONS
     return {"models": list(MODEL_FUNCTIONS.keys())}
 
+@app.get("/api/tools/{model_name}")
+async def check_tool_support(model_name: str):
+    """Check if a specific model supports tool calling"""
+    from tools import is_tool_supported
+    return {
+        "model": model_name,
+        "supports_tools": is_tool_supported(model_name)
+    }
+
 def main():
     """Main function to run the FastAPI application with uvicorn server."""
+    
     uvicorn.run(
         app,
         host="0.0.0.0",

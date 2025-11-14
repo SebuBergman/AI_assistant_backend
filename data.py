@@ -17,7 +17,6 @@ valid_claude_models = {
 }
 
 supports_tools = {
-  "deepseek-chat",
   "gpt-5",
   "gpt-4.1",
   "gpt-4o",
@@ -30,7 +29,7 @@ supports_tools = {
 
 supports_tools_true_false = {
   "deepseek-reasoner" : "false",
-  "deepseek-chat" : "true",
+  "deepseek-chat" : "false (for now)",
   "gpt-5" : "true",
   "gpt-5-mini" : "false",
   "gpt-5-nano" : "false",
@@ -63,7 +62,7 @@ valid_ollama_models = {
 
 ollama_model_descriptions = {
     "LLaMA 3.2 3B": (
-
+        ""
     ),
     "LLaMA 3.1 8B": (
         "Compact general-purpose model. Good for everyday chat, creative writing, summarization, "
