@@ -53,7 +53,7 @@ async def email_assistant_endpoint(request: EmailRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/ask_ai")
+@app.post("/api/generate")
 async def ask_ai_endpoint(request: AI_Request):
     """Unified streaming generator that wraps ai_assistant functions"""
     
