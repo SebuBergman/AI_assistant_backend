@@ -26,7 +26,7 @@ def rewrite_email(request: EmailRequest, openai_client: OpenAI):
 
         try:
             openai_response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4.1-mini",
                 messages=[{"role": "user", "content": system_prompt}],
                 temperature=0.5,
             )
