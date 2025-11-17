@@ -10,7 +10,7 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
 from data import valid_gpt_models, valid_claude_models
-from tools import ALL_TOOLS, LANGCHAIN_TOOLS, TOOL_FUNCTIONS, is_tool_supported
+from tools import LANGCHAIN_TOOLS, is_tool_supported
 
 class AI_Request(BaseModel):
     question: str
@@ -88,7 +88,6 @@ def deepseek_reasoner_stream(request: AI_Request, **kwargs) -> AsyncGenerator: #
     
 def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: ignore
     """Handle Claude models with LangCgain tool calling support and streaming"""
-    client = kwargs.get('anthropic_client')
 
     print(f"Received request for model: {request.model}")
 
@@ -188,9 +187,8 @@ def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
 
 def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: ignore
     """Handle all GPT model requests with dynamic model selection"""
-    client = kwargs.get('openai_client')
 
-    print(f"Processing request for model: {request.model}")
+    print(f"[GPT] Processing request for model: {request.model}")
     # Validate the model name
     
     if request.model not in valid_gpt_models:
@@ -243,20 +241,26 @@ def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: 
             iteration += 1
             print(f"[GPT] Iteration {iteration}")
             
-            # Stream the response
-            response_content = ""
-            tool_calls_list = []
+            # Use LangChain's message accumulation for proper tool call handling
+            from langchain_core.messages import AIMessageChunk
             
-            # For streaming, we need to use the stream method
+            accumulated_message = None
+            
+            # Stream and accumulate chunks properly
             for chunk in llm_with_tools.stream(messages):
-                # Collect content
+                # Yield content immediately for streaming UX
                 if chunk.content:
-                    response_content += chunk.content
                     yield chunk.content
                 
-                # Collect tool calls (they come at the end)
-                if hasattr(chunk, 'tool_calls') and chunk.tool_calls:
-                    tool_calls_list.extend(chunk.tool_calls)
+                # Accumulate the message chunks properly
+                if accumulated_message is None:
+                    accumulated_message = chunk
+                else:
+                    accumulated_message = accumulated_message + chunk
+            
+            # Extract the complete response with properly formed tool calls
+            response_content = accumulated_message.content if accumulated_message else ""
+            tool_calls_list = accumulated_message.tool_calls if (accumulated_message and hasattr(accumulated_message, 'tool_calls')) else []
             
             # Check if there are tool calls
             if tool_calls_list:
@@ -315,11 +319,11 @@ MODEL_FUNCTIONS = {
     "gpt-4.1-mini": gpt_models_stream,
     "gpt-4.1-nano": gpt_models_stream,
     "gpt-4o": gpt_models_stream,
-    "claude-3-5-haiku-latest": claude_models_stream,
-    "claude-3-5-sonnet-latest": claude_models_stream,
-    "claude-3-7-sonnet-latest": claude_models_stream,
     "claude-sonnet-4-5": claude_models_stream,
+    "claude-haiku-4-5": claude_models_stream,
     "claude-opus-4-1": claude_models_stream,
+    "claude-3-5-haiku-latest": claude_models_stream,
+    "claude-3-7-sonnet-latest": claude_models_stream,
 }
 
 def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
