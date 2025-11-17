@@ -10,9 +10,9 @@ valid_gpt_models = {
 
 valid_claude_models = {
   "claude-sonnet-4-5": "Claude Sonnet 4.5 (Next-gen Sonnet tier: high throughput, production workloads with strong coding & reasoning) ",
+  "claude-haiku-4-5": "Claude Haiku 4.5 (Lightweight tier: fast responses, cost-efficient throughput, ideal for summaries, chat, and everyday tasks)",
   "claude-opus-4-1": "Claude Opus 4.1 (Top-tier flagship: complex reasoning, long context, full-agent capability and highest accuracy) ",
   "claude-3-5-haiku-latest": "Claude 3.5 Haiku (Fast and cost-efficient; good for everyday queries, moderation & translation)",
-  "claude-3-5-sonnet-latest": "Claude 3.5 Sonnet (Balanced performance and cost; capable of deeper reasoning & data tasks)",
   "claude-3-7-sonnet-latest": "Claude 3.7 Sonnet (Hybrid reasoning mode: choose speed vs depth; advanced coding and agent workflows) ",
 }
 
@@ -21,9 +21,9 @@ supports_tools = {
   "gpt-4.1",
   "gpt-4o",
   "claude-sonnet-4-5",
+  "claude-haiku-4-5",
   "claude-opus-4-1",
   "claude-3-5-haiku-latest",
-  "claude-3-5-sonnet-latest",
   "claude-3-7-sonnet-latest",
 }
 
@@ -38,9 +38,9 @@ supports_tools_true_false = {
   "gpt-4.1-nano" : "false",
   "gpt-4o" : "true",
   "claude-sonnet-4-5": "true",
+  "claude-haiku-4-5": "true",
   "claude-opus-4-1": "true",
   "claude-3-5-haiku-latest": "true",
-  "claude-3-5-sonnet-latest": "true",
   "claude-3-7-sonnet-latest": "true",
 }
 
