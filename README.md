@@ -27,7 +27,7 @@ Install dependencies:
 uv pip install -r requirements.txt
 ```
 
-Create .env (requirements)
+Create .env (requirements)<br>
 TAVILY_API_KEY=<tavily_key>
 
 Run locally:
