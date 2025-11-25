@@ -1,4 +1,3 @@
-# AI_assistant_backend
 Backend Repository (FastAPI + Python)
 📌 Project Name: GenAI Email Assistant & AI Chat Backend
 
