@@ -29,6 +29,9 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+Create .env (requirements)
+TAVILY_API_KEY=<tavily_key>
+
 Run locally:
 ```bash
 uvicorn main:app --reload
