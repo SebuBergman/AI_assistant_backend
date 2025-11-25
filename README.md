@@ -19,18 +19,19 @@ cd backend-repo
 
 Set up a virtual environment:
 ```bash
-python -m venv ai_assistant
-ai_assistant/Scripts/activate  # Windows
-source ai_assistant/bin/activate  # Linux/Mac
+uv venv
 ```
 
 Install dependencies:
 ```bash
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
+
 
 Run locally:
 ```bash
+.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # Linux/Mac
 uvicorn main:app --reload
 ```
 
