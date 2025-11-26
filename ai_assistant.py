@@ -16,7 +16,7 @@ class AI_Request(BaseModel):
     question: str
     model: str
     temperature: float = 1
-    max_tokens: int = 2048
+    max_tokens: int = 10240
 
 # DeepSeek model functions remain the same as before
 def deepseek_chat_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: ignore
@@ -321,9 +321,8 @@ MODEL_FUNCTIONS = {
     "gpt-4o": gpt_models_stream,
     "claude-sonnet-4-5": claude_models_stream,
     "claude-haiku-4-5": claude_models_stream,
-    "claude-opus-4-1": claude_models_stream,
+    "claude-opus-4-5": claude_models_stream,
     "claude-3-5-haiku-latest": claude_models_stream,
-    "claude-3-7-sonnet-latest": claude_models_stream,
 }
 
 def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, anthropic_client):
