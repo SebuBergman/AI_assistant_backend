@@ -1,44 +1,205 @@
-# Backend Repository (FastAPI + Python)<br>
-📌 Project Name: GenAI Email Assistant & AI Chat Backend<br><br>
-🚀 Description:<br>
-FastAPI-powered backend for email tone transformation (professional, friendly, persuasive) and a multi-model AI assistant. Features advanced prompt engineering, OpenAI integration, and dynamic model selection.
+# Backend – AI Assistant API
 
-🛠️ Tech Stack:<br>
-Python + FastAPI<br>
-OpenAI API<br>
-RESTful API Design
+## 📌 Overview
+This backend powers an AI-driven assistant with support for:
+- Multi-model text generation (13 LLMs including GPT-5, Claude Sonnet 4.5, DeepSeek)
+- Email rewriting & generation
+- RAG with hybrid keyword + vector search
+- PDF uploading, embedding, querying, and retrieval
+- Model capabilities discovery (incl. tool support)
+- Caching utilities
+- Milvus/Zilliz statistics & schema validation
 
-🧰 Getting Started:<br>
-‼️ Prerequisites: Python 3.9+ and venv
+Built with **FastAPI**, **Milvus**, and multiple AI provider SDKs.
 
-Clone the repo:
+---
+
+## 🧠 Tech Stack
+- **Python**
+- **FastAPI**
+- **OpenAI / Anthropic / DeepSeek APIs**
+- **LangChain / LangChain Core**
+- **Pydantic**
+- **dotenv**
+- **Milvus / Zilliz cloud (pymilvus)**
+- **boto3**
+- **Tavily**
+- **RESTful API Design**
+
+---
+
+## 🚀 Getting Started
+
+### 1. Clone the repo:
 ```bash
-git clone https://github.com/your-username/backend-repo.git
+git clone https://github.com/your-username/AI_assistant_backend.git
 cd backend-repo
 ```
 
-Set up a virtual environment:
+### 2. Create virtual environment
 ```bash
 uv venv
 ```
 
-Install dependencies:
+### 3. Install dependencies
 ```bash
 uv pip install -r requirements.txt
 ```
 
-Create .env (requirements)<br>
-TAVILY_API_KEY=<tavily_key>
+### 4. Environment variables
+Create a `.env` file based on `.env-template`:
 
-Run locally:
+```
+# Copy everything from .env-template and fill in your credentials
+TAVILY_API_KEY=<your-key>
+OPENAI_API_KEY=<your-key>
+ANTHROPIC_API_KEY=<your-key>
+DEEPSEEK_API_KEY=<your-key>
+
+ZILLIZ_CLOUD_URI=<public-endpoint>
+ZILLIZ_CLOUD_TOKEN=<your-token>
+EMBEDDING_DIM=<embedding-dimension (1536 for current setup)>
+
+DATABASE_NAME=<cluster-name>
+UPLOAD_PATH=<name-of-local-upload-directory (e.g. "./data")>
+QUERY_CACHE_COLLECTION_NAME=<query-cache collection name>
+EMBEDDINGS_COLLECTION_NAME=<embeddings collection name>
+PDFS_COLLECTION_NAME=<pdf collection name>
+
+AWS_ACCESS_KEY_ID=<your-key>
+AWS_SECRET_ACCESS_KEY=<your-key>
+AWS_REGION=<your-region>
+S3_BUCKET_NAME=<bucket-name>
+...
+```
+
+**Steps**
+1. Create `.env` file in the root  
+2. Copy values from `.env-template`  
+3. Replace `<placeholder>` with your real credentials  
+
+---
+
+### 5. Create local folder
+Windows / Linux / macOS:
 ```bash
-.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # Linux/Mac
+mkdir <UPLOAD_PATH>
+```
+
+### 6. Run locally
+Windows:
+```bash
+.venv\Scripts\activate
 uvicorn main:app --reload
 ```
 
-→ API docs at http://localhost:8000/docs
+Linux / macOS:
+```bash
+source .venv/bin/activate
+uvicorn main:app --reload
+```
 
-🔗 Frontend Integration: Configure the frontend to point to http://localhost:8000
+---
 
-<a href="https://github.com/SebuBergman/AI_assistant_frontend">AI front-end</a>
+## 📡 API Endpoints
+
+### **Email Assistant**
+#### `POST /email_assistant`
+Rewrite or generate email text based on user prompt.
+
+---
+
+### **Unified Generator**
+#### `POST /api/generate`
+- Streamed response generation  
+- Select from **13 LLM models**  
+- Adjustable temperature  
+- Optional **RAG**:  
+  - Keyword (optional) + vector hybrid search  
+  - Uses embedded PDFs  
+  - Upload and choose PDF sources  
+
+---
+
+### **Vector Database**
+#### `POST /query`
+Query embedding db via hybrid search (keyword (optional) + vector).
+
+---
+
+### **Model Management**
+#### `GET /api/models`
+List available LLM models.
+
+#### `GET /api/tools/{model_name}`
+Check if the chosen model supports **tool calling**.
+
+---
+
+### **PDF Embeddings**
+#### `POST /upload`
+Upload & embed a PDF.
+
+#### `GET /fetch_pdfs`
+Retrieve list of available PDFs.
+
+---
+
+### **Caching System**
+#### `/cache/stats`
+Cache statistics
+
+#### `/cache/clear_old`
+Clear expired cache entries (older than 30 days)
+
+#### `/cache/clear_all`
+Clear all cached content
+
+#### `/cache/entries`
+List all cached entries
+
+---
+
+### **System Utilities**
+#### `/clear_all`
+Remove:
+- embeddings  
+- PDFs  
+- S3 content  
+
+#### `/milvus/stats`
+See Milvus/Zilliz collection stats.
+
+#### `/milvus/schema`
+View & verify current Milvus collection schema.
+
+#### `/health`
+Health check endpoint.
+
+---
+
+## 📄 .env Template
+Make sure to check the `.env-template` file inside the repository.  
+All sensitive authentication keys go there (rename to .env to not accidentally upload to Github).
+
+---
+
+## 🛠️ Other Notes
+- Structured and modular FastAPI architecture  
+- Ready for Dockerization  
+- Integrates directly with the frontend for streaming AI responses  
+
+---
+
+## 🔗 Frontend Link
+👉 **View the Frontend README here:**  
+https://github.com/your-username/AI_assistant_frontend
+
+---
+
+## 📝 TODO
+- Improve email rewriting prompt to reduce errors  
+- Add PDF page count + size metadata  
+- Add RAG usage analytics  
+- Improve model metadata descriptions  
+
