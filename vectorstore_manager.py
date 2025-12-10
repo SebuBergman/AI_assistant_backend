@@ -8,7 +8,7 @@ load_dotenv()
 # Zilliz Cloud connection configuration
 ZILLIZ_CLOUD_URI = os.getenv("ZILLIZ_CLOUD_URI")
 ZILLIZ_CLOUD_TOKEN = os.getenv("ZILLIZ_CLOUD_TOKEN")
-COLLECTION_NAME = os.getenv("MILVUS_COLLECTION_NAME", "embeddings")
+COLLECTION_NAME = os.getenv("EMBEDDINGS_COLLECTION_NAME", "embeddings")
 
 # Validate required environment variables
 if not ZILLIZ_CLOUD_URI or not ZILLIZ_CLOUD_TOKEN:

@@ -5,7 +5,7 @@ from openai import OpenAI
 from anthropic import Anthropic
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from typing import List, Dict, Optional
+from typing import Optional
 import datetime
 import os
 import uvicorn
@@ -348,7 +348,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         
         # Upload to S3
         bucket_name = os.getenv("S3_BUCKET_NAME")
-        s3_key = f"pdfs/{file.filename}"
+        s3_key = f"fetch_pdfs/{file.filename}"
         s3_url = upload_to_s3(file_path, bucket_name, s3_key)
         
         # Load and process PDF with LangChain
@@ -402,7 +402,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         print(f"Error in upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
-@app.get("/pdfs")
+@app.get("/fetch_pdfs")
 def get_pdfs():
     """Get the list of available PDFs."""
     try:
