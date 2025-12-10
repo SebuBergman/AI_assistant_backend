@@ -49,23 +49,28 @@ uv pip install -r requirements.txt
 ### 4. Environment variables
 Create a `.env` file based on `.env-template`:
 
-```
 # Copy everything from .env-template and fill in your credentials
+```
+# API key for Tavily service (Web search)
 TAVILY_API_KEY=<your-key>
+# API keys for AI services
 OPENAI_API_KEY=<your-key>
 ANTHROPIC_API_KEY=<your-key>
 DEEPSEEK_API_KEY=<your-key>
 
+# Zilliz cloud config
 ZILLIZ_CLOUD_URI=<public-endpoint>
 ZILLIZ_CLOUD_TOKEN=<your-token>
 EMBEDDING_DIM=<embedding-dimension (1536 for current setup)>
 
+# Cluster and collection names
 DATABASE_NAME=<cluster-name>
 UPLOAD_PATH=<name-of-local-upload-directory (e.g. "./data")>
 QUERY_CACHE_COLLECTION_NAME=<query-cache collection name>
 EMBEDDINGS_COLLECTION_NAME=<embeddings collection name>
 PDFS_COLLECTION_NAME=<pdf collection name>
 
+# AWS S3 Configuration
 AWS_ACCESS_KEY_ID=<your-key>
 AWS_SECRET_ACCESS_KEY=<your-key>
 AWS_REGION=<your-region>
@@ -194,6 +199,7 @@ All sensitive authentication keys go there (rename to .env to not accidentally u
 ## 🔗 Frontend Link
 👉 **View the Frontend README here:**  
 https://github.com/your-username/AI_assistant_frontend
+[`https://github.com/your-username/AI_assistant_frontend`](https://github.com/SebuBergman/AI_assistant_frontend)
 
 ---
 
