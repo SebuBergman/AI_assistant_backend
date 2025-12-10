@@ -198,7 +198,6 @@ All sensitive authentication keys go there (rename to .env to not accidentally u
 
 ## 🔗 Frontend Link
 👉 **View the Frontend README here:**  
-https://github.com/your-username/AI_assistant_frontend
 [`https://github.com/your-username/AI_assistant_frontend`](https://github.com/SebuBergman/AI_assistant_frontend)
 
 ---
