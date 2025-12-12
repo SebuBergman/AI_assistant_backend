@@ -26,6 +26,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from db import (
     QUERY_CACHE_COLLECTION,
+    delete_document_embeddings,
+    delete_pdf_metadata,
     get_pdf_metadata,
     insert_pdf_metadata,
     clear_cache_entries,
@@ -36,7 +38,7 @@ from db import (
     clear_all_pdfs,
     get_milvus_collection_stats,
 )
-from S3_bucket import upload_to_s3, delete_all_s3_files
+from S3_bucket import delete_s3_file, upload_to_s3, delete_all_s3_files
 from rag_search import (
     vector_search,
     keyword_search,
@@ -210,12 +212,12 @@ def get_rag_context(question: str, file_name: str = "", keyword: str = "",
         return None, f"Error: {str(e)}"
 
 # ============================================================================
-# ENDPOINTS - Original AI Assistant
+# ENDPOINTS - AI Assistant
 # ============================================================================
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the Merged AI Assistant API with RAG"}
+    return {"message": "Welcome to the AI Assistant API with RAG Support!"}
 
 @app.post("/email_assistant")
 async def email_assistant_endpoint(request: EmailRequest):
@@ -612,7 +614,39 @@ def list_cache_entries(limit: int = 10):
 # ============================================================================
 # ENDPOINTS - Data Management
 # ============================================================================
+
+@app.post("/delete_document")
+async def delete_document(request: dict):
+    """Delete a specific document (embeddings, PDF metadata, and S3 file)"""
+    try:
+        file_name = request.get("file_name")
+        if not file_name:
+            raise HTTPException(status_code=400, detail="file_name is required")
+        
+        # Delete embeddings for this document
+        embeddings_deleted = delete_document_embeddings(file_name)
+        
+        # Delete PDF metadata
+        pdf_metadata_deleted = delete_pdf_metadata(file_name)
+        
+        # Delete from S3
+        s3_deleted = delete_s3_file(file_name)
+        
+        # Reset vectorstore to reflect changes
+        reset_vectorstore()
+        
+        return {
+            "status": "success",
+            "message": f"Document '{file_name}' deleted successfully",
+            "embeddings_deleted": embeddings_deleted,
+            "pdf_metadata_deleted": pdf_metadata_deleted,
+            "s3_file_deleted": s3_deleted
+        }
     
+    except Exception as e:
+        print(f"Error deleting document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+   
 @app.post("/clear_all")
 async def clear_all():
     """Clear all data (embeddings, PDFs, and S3)"""
