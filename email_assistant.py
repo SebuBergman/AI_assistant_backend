@@ -1,40 +1,59 @@
-from openai import OpenAI
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
+from fastapi import StreamingResponse
+
+import SSEStreamer
 
 class EmailRequest(BaseModel):
     email: str
     tone: str
 
-def rewrite_email(request: EmailRequest, openai_client: OpenAI):
-    """Receives an email text and rewrites it."""
-    try:
-        email = request.email
-        email_tone = request.tone
+def rewrite_email_stream(request: EmailRequest):
+    email = request.email
+    tone = request.tone
 
-        system_prompt = f"""
-        I want you to act as an email assistant. I want you to rewrite the email text provided in a chosen tone.
-        
-        Email Text:
-        {email}
+    prompt = f"""
+    Rewrite the following email in the tone: {tone}
 
-        The tone of the email is: {email_tone}.
+    Email:
+    {email}
 
-        Rules:
-        - I want you to write an email in the tone that is given.
-        - Use a basic email template. Make the email structure fit the tone.
-        """
+    Rules:
+    - Match the requested tone.
+    - Use an appropriate email structure.
+    """
 
+    # Create a streaming callback
+    callback = SSEStreamer()
+
+    # Initialize LangChain ChatOpenAI with streaming enabled
+    llm = ChatOpenAI(
+        model="gpt-5-mini",
+        streaming=True,
+        callbacks=[callback]
+    )
+
+    # LangChain expects an array of messages
+    messages = [
+        ("user", prompt),
+    ]
+
+    def stream_generator():
         try:
-            openai_response = openai_client.chat.completions.create(
-                model="gpt-4.1-mini",
-                messages=[{"role": "user", "content": system_prompt}],
-                temperature=0.5,
-            )
-            rewritten_email = openai_response.choices[0].message.content
+            # Trigger the streaming run
+            llm.invoke(messages)
+
+            # After invoke starts, stream tokens as they appear
+            while True:
+                tokens = callback.get_tokens()
+                if tokens:
+                    yield f"data: {tokens}\n\n"
+                else:
+                    break
+
+            yield "data: [DONE]\n\n"
+
         except Exception as e:
-            print(f"OpenAI API error: {str(e)}")
-            rewritten_email = "I encountered an error while processing your question."
-        return {"rewritten_email": rewritten_email}
-    except Exception as e:
-        print(f"Error in email rewrite: {str(e)}")
-        raise
+            yield f"data: STREAM_ERROR: {str(e)}\n\n"
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
