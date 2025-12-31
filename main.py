@@ -13,7 +13,7 @@ import json
 import boto3
 
 # Your existing imports
-from email_assistant import rewrite_email, EmailRequest
+from email_assistant import rewrite_email_stream, EmailRequest
 from ai_assistant import ask_ai, AI_Request
 from tools import is_tool_supported
 
@@ -116,7 +116,7 @@ class ChatRequest(BaseModel):
     model: str
     prompt: str
     temperature: float = 0.7
-    max_tokens: int = 10240
+    max_tokens: int = 20240
 
 class QueryRequest(BaseModel):
     question: str
@@ -130,7 +130,7 @@ class ExtendedAI_Request(BaseModel):
     model: str
     prompt: str
     temperature: float = 0.7
-    max_tokens: int = 10240
+    max_tokens: int = 20240
     ragEnabled: bool = False
     file_name: Optional[str] = ""
     keyword: Optional[str] = ""
@@ -222,8 +222,10 @@ def read_root():
 @app.post("/email_assistant")
 async def email_assistant_endpoint(request: EmailRequest):
     try:
-        return rewrite_email(request, openai_client)
+        return await rewrite_email_stream(request)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/generate")

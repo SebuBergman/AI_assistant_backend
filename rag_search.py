@@ -24,7 +24,7 @@ def keyword_search(query: str, file_name: str = None, limit: int = 7) -> List[Di
         # If file_name field exists server-side, we could in principle use expr filtering in the vectorstore query,
         # but keyword search here does a simple content substring scan (LangChain returns metadata)
         # We'll get a reasonably large k then filter:
-        docs = vs.similarity_search(query="", k=1000)
+        docs = vs.similarity_search(query="", k=100)
         query_lower = query.lower()
         results = []
         for doc in docs:
