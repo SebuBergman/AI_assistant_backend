@@ -53,10 +53,13 @@ from vectorstore_manager import (
     reset_vectorstore
 )
 
+# Import chat title router
+from chat_title import router as chat_title_router
+
 load_dotenv()
 
 # FastAPI app initialization
-app = FastAPI()
+app = FastAPI(title="AI Assistant API", version="1.0.0")
 
 # API Keys
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -99,7 +102,7 @@ text_splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=200,
 )
 
-# CORS configuration - Combined both origins
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "*"],
@@ -212,15 +215,59 @@ def get_rag_context(question: str, file_name: str = "", keyword: str = "",
         return None, f"Error: {str(e)}"
 
 # ============================================================================
-# ENDPOINTS - AI Assistant
+# ROUTERS - Include all feature routers
 # ============================================================================
 
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the AI Assistant API with RAG Support!"}
+# Chat endpoints (includes title generation)
+app.include_router(chat_title_router, prefix="/chat", tags=["Chat"])
 
-@app.post("/email_assistant")
+# ============================================================================
+# ENDPOINTS - General
+# ============================================================================
+
+@app.get("/", tags=["General"])
+def read_root():
+    return {
+        "message": "Welcome to the AI Assistant API with RAG Support!",
+        "version": "1.0.0",
+        "endpoints": {
+            "chat": "/chat/*",
+            "email": "/email_assistant",
+            "ai": "/api/*",
+            "rag": "/upload, /query, /fetch_pdfs",
+            "cache": "/cache/*",
+            "milvus": "/milvus/*",
+            "management": "/delete_document, /clear_all"
+        }
+    }
+
+@app.get("/health", tags=["General"])
+def health_check():
+    """Health check endpoint to verify connections"""
+    try:
+        vs = get_vectorstore()
+        milvus_status = "connected" if vs is not None else "disconnected"
+        stats = get_milvus_collection_stats()
+        
+        return {
+            "status": "healthy",
+            "milvus": milvus_status,
+            "collection": COLLECTION_NAME,
+            "stats": stats
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+
+# ============================================================================
+# ENDPOINTS - Email Assistant
+# ============================================================================
+
+@app.post("/email_assistant", tags=["Email"])
 async def email_assistant_endpoint(request: EmailRequest):
+    """Rewrite emails in different tones"""
     try:
         return await rewrite_email_stream(request)
     except Exception as e:
@@ -228,7 +275,11 @@ async def email_assistant_endpoint(request: EmailRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/generate")
+# ============================================================================
+# ENDPOINTS - AI Assistant
+# ============================================================================
+
+@app.post("/api/generate", tags=["AI Assistant"])
 async def ask_ai_endpoint(request: ExtendedAI_Request):
     """Unified streaming generator with optional RAG support"""
     
@@ -302,14 +353,14 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
             "X-Accel-Buffering": "no",
         }
     )
-    
-@app.get("/api/models")
+
+@app.get("/api/models", tags=["AI Assistant"])
 async def list_models():
-    """Get list of available models"""
+    """Get list of available AI models"""
     from ai_assistant import MODEL_FUNCTIONS
     return {"models": list(MODEL_FUNCTIONS.keys())}
 
-@app.get("/api/tools/{model_name}")
+@app.get("/api/tools/{model_name}", tags=["AI Assistant"])
 async def check_tool_support(model_name: str):
     """Check if a specific model supports tool calling"""
     return {
@@ -318,32 +369,12 @@ async def check_tool_support(model_name: str):
     }
 
 # ============================================================================
-# ENDPOINTS - RAG System
+# ENDPOINTS - RAG / Document Management
 # ============================================================================
 
-@app.get("/health")
-def health_check():
-    """Health check endpoint to verify connections"""
-    try:
-        vs = get_vectorstore()
-        milvus_status = "connected" if vs is not None else "disconnected"
-        stats = get_milvus_collection_stats()
-        
-        return {
-            "status": "healthy",
-            "milvus": milvus_status,
-            "collection": COLLECTION_NAME,
-            "stats": stats
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-
-@app.post("/upload")
+@app.post("/upload", tags=["RAG"])
 async def upload_pdf(file: UploadFile = File(...)):
-    """Upload and process a PDF"""
+    """Upload and process a PDF document"""
     try:
         # Save file temporarily
         file_path = os.path.join(UPLOAD_PATH, file.filename)
@@ -405,17 +436,17 @@ async def upload_pdf(file: UploadFile = File(...)):
     except Exception as e:
         print(f"Error in upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/fetch_pdfs")
+
+@app.get("/fetch_pdfs", tags=["RAG"])
 def get_pdfs():
-    """Get the list of available PDFs."""
+    """Get the list of available PDF documents"""
     try:
         pdfs = get_pdf_metadata()
         return {"pdfs": pdfs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving PDFs: {str(e)}")
 
-@app.post("/query")
+@app.post("/query", tags=["RAG"])
 async def query(request: QueryRequest):
     """Query the RAG system with custom Milvus caching"""
     try:
@@ -537,87 +568,7 @@ async def query(request: QueryRequest):
         print(f"Error in query: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ============================================================================
-# ENDPOINTS - Cache Management
-# ============================================================================
-
-@app.get("/cache/stats")
-def cache_stats_endpoint():
-    """Endpoint to return cache stats."""
-    try:
-        stats = db_get_cache_stats()
-        if "error" in stats:
-            raise HTTPException(status_code=500, detail=stats["error"])
-        return stats
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/cache/clear_old")
-def clear_old_cache_entries_endpoint(days: int = 30):
-    """Clear cache entries older than specified days (default: 30)."""
-    try:
-        if days <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Days parameter must be positive"
-            )
-            
-        deleted_count = clear_cache_entries(days=days)
-        return {
-            "status": "success",
-            "message": f"Deleted {deleted_count} entries older than {days} days",
-            "deleted_count": deleted_count,
-            "days": days
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error clearing old cache entries: {str(e)}"
-        )
-
-@app.post("/cache/clear_all")
-def clear_whole_cache():
-    """Clear ALL cache entries."""
-    try:
-        deleted_count = clear_cache_entries()
-        return {
-            "status": "success",
-            "message": f"Deleted all {deleted_count} cache entries",
-            "deleted_count": deleted_count
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error clearing cache: {str(e)}"
-        )
-
-@app.get("/cache/entries")
-def list_cache_entries(limit: int = 10):
-    """List recent cached queries from Milvus."""
-    try:
-        results = milvus_client.query(
-            collection_name=QUERY_CACHE_COLLECTION,
-            filter="pk >= 0",
-            output_fields=["query", "answer", "timestamp"],
-            limit=limit
-        )
-
-        results = sorted(results, key=lambda x: x["timestamp"], reverse=True)
-
-        for r in results:
-            r["timestamp"] = datetime.datetime.fromtimestamp(r["timestamp"]).isoformat()
-
-        return {"entries": results, "count": len(results)}
-
-    except Exception as e:
-        print(f"Error listing cache entries: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ============================================================================
-# ENDPOINTS - Data Management
-# ============================================================================
-
-@app.post("/delete_document")
+@app.post("/delete_document", tags=["RAG"])
 async def delete_document(request: dict):
     """Delete a specific document (embeddings, PDF metadata, and S3 file)"""
     try:
@@ -648,10 +599,10 @@ async def delete_document(request: dict):
     except Exception as e:
         print(f"Error deleting document: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-   
-@app.post("/clear_all")
+
+@app.post("/clear_all", tags=["RAG"])
 async def clear_all():
-    """Clear all data (embeddings, PDFs, and S3)"""
+    """Clear all data (embeddings, PDFs, cache, and S3)"""
     try:
         embeddings_cleared = clear_all_embeddings()
         reset_vectorstore()
@@ -671,7 +622,87 @@ async def clear_all():
         print(f"Error clearing data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/milvus/stats")
+# ============================================================================
+# ENDPOINTS - Cache Management
+# ============================================================================
+
+@app.get("/cache/stats", tags=["Cache"])
+def cache_stats_endpoint():
+    """Get cache statistics"""
+    try:
+        stats = db_get_cache_stats()
+        if "error" in stats:
+            raise HTTPException(status_code=500, detail=stats["error"])
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/cache/clear_old", tags=["Cache"])
+def clear_old_cache_entries_endpoint(days: int = 30):
+    """Clear cache entries older than specified days (default: 30)"""
+    try:
+        if days <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Days parameter must be positive"
+            )
+            
+        deleted_count = clear_cache_entries(days=days)
+        return {
+            "status": "success",
+            "message": f"Deleted {deleted_count} entries older than {days} days",
+            "deleted_count": deleted_count,
+            "days": days
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error clearing old cache entries: {str(e)}"
+        )
+
+@app.post("/cache/clear_all", tags=["Cache"])
+def clear_whole_cache():
+    """Clear ALL cache entries"""
+    try:
+        deleted_count = clear_cache_entries()
+        return {
+            "status": "success",
+            "message": f"Deleted all {deleted_count} cache entries",
+            "deleted_count": deleted_count
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error clearing cache: {str(e)}"
+        )
+
+@app.get("/cache/entries", tags=["Cache"])
+def list_cache_entries(limit: int = 10):
+    """List recent cached queries from Milvus"""
+    try:
+        results = milvus_client.query(
+            collection_name=QUERY_CACHE_COLLECTION,
+            filter="pk >= 0",
+            output_fields=["query", "answer", "timestamp"],
+            limit=limit
+        )
+
+        results = sorted(results, key=lambda x: x["timestamp"], reverse=True)
+
+        for r in results:
+            r["timestamp"] = datetime.datetime.fromtimestamp(r["timestamp"]).isoformat()
+
+        return {"entries": results, "count": len(results)}
+
+    except Exception as e:
+        print(f"Error listing cache entries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# ENDPOINTS - Milvus Management
+# ============================================================================
+
+@app.get("/milvus/stats", tags=["Milvus"])
 def milvus_stats():
     """Get Milvus/Zilliz collection statistics"""
     try:
@@ -680,7 +711,7 @@ def milvus_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/milvus/schema")
+@app.get("/milvus/schema", tags=["Milvus"])
 def get_collection_schema():
     """Get the current collection schema to verify it's correct"""
     try:
