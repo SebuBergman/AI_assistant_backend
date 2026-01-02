@@ -47,40 +47,24 @@ def create_milvus_collection():
         print(f"Creating new collection: {MILVUS_COLLECTION_NAME}")
 
         # Define schema
-        schema = milvus_client.create_schema(
-            auto_id=True,
-            enable_dynamic_field=True,
-            description="RAG document embeddings collection"
-        )
+        schema = milvus_client.create_schema(auto_id=True, enable_dynamic_field=True, description="RAG document embeddings collection")
 
-        schema.add_field(
-            field_name="pk",
-            datatype=DataType.INT64,
-            is_primary=True,
-            auto_id=True,
-            description="Primary key"
-        )
+        # Primary
+        schema.add_field(field_name="pk", datatype=DataType.INT64, is_primary=True, auto_id=True, description="Primary key")
 
-        schema.add_field(
-            field_name="vector",
-            datatype=DataType.FLOAT_VECTOR,
-            dim=EMBEDDING_DIM,
-            description="Document embedding vector"
-        )
+        # Document content + embeddings
+        schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=65535, description="Document text content")
+        schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=EMBEDDING_DIM, description="Document embedding vector")
+        schema.add_field(field_name="file_name", datatype=DataType.VARCHAR, max_length=512, description="Original PDF filename / source")
 
-        schema.add_field(
-            field_name="text",
-            datatype=DataType.VARCHAR,
-            max_length=65535,
-            description="Document text content"
-        )
+        # Chunk-level metadata
+        schema.add_field(field_name="chunk_id", datatype=DataType.VARCHAR, max_length=128, description="Unique chunk ID")
+        schema.add_field(field_name="chunk_index", datatype=DataType.INT64, description="Index of chunk within document")
+        schema.add_field(field_name="page", datatype=DataType.INT64, description="Page number")
+        schema.add_field(field_name="file_size", datatype=DataType.INT64, description="Size of PDF in bytes")
+        schema.add_field(field_name="upload_date", datatype=DataType.VARCHAR, max_length=32, description="Upload date as ISO string")
+        schema.add_field(field_name="file_id", datatype=DataType.VARCHAR, max_length=128, description="Unique file ID")
 
-        schema.add_field(
-            field_name="file_name",
-            datatype=DataType.VARCHAR,
-            max_length=512,
-            description="Original PDF filename / source"
-        )
 
         # Index
         index_params = milvus_client.prepare_index_params()
@@ -98,7 +82,7 @@ def create_milvus_collection():
             consistency_level="Strong"
         )
 
-        print(f"✓ Created collection '{MILVUS_COLLECTION_NAME}' with file_name field")
+        print(f"✓ Created collection '{MILVUS_COLLECTION_NAME}' with text, vector, file_name, chunk_id, chunk_index, page, file_size, upload_date and file_id fields")
 
         # Load collection
         milvus_client.load_collection(MILVUS_COLLECTION_NAME)
@@ -116,9 +100,12 @@ def create_pdf_metadata_collection():
     schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=True)
     schema.add_field("file_name", DataType.VARCHAR, max_length=512)
     schema.add_field("file_path", DataType.VARCHAR, max_length=1024)
-    schema.add_field("timestamp", DataType.INT64)
-    
-    # Add vector field
+    schema.add_field("upload_date", DataType.VARCHAR, max_length=32)
+    schema.add_field("file_size", DataType.INT64)
+    schema.add_field("chunks", DataType.INT64)
+    schema.add_field("file_id", DataType.VARCHAR, max_length=128)
+
+    # Keep the embedding field
     schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=384)
 
     # Create collection
@@ -190,20 +177,22 @@ create_pdf_metadata_collection()
 create_query_cache_collection()
 
 # PDF Metadata operations
-def insert_pdf_metadata(file_name, file_path, embedding=None):
+def insert_pdf_metadata(file_name, file_path, file_size, upload_date, file_id, chunks, embedding=None):
     """Store PDF metadata into Milvus."""
-    
-    # If no embedding provided, create a dummy one (or generate a real one)
+
     if embedding is None:
-        embedding = [0.0] * 384  # Dummy embedding - replace with actual embeddings!
-    
+        embedding = [0.0] * 384  # Dummy embedding if no vector available
+
     milvus_client.insert(
         collection_name=PDF_COLLECTION,
         data=[{
             "file_name": file_name,
             "file_path": file_path,
-            "timestamp": int(time.time()), # store as int seconds
-            "embedding": embedding  # vector field
+            "upload_date": upload_date,
+            "file_size": file_size,
+            "chunks": chunks,
+            "file_id": file_id,
+            "embedding": embedding
         }]
     )
     print(f"✓ Saved PDF metadata for {file_name}")
@@ -213,14 +202,13 @@ def get_pdf_metadata():
     results = milvus_client.query(
         collection_name=PDF_COLLECTION,
         filter="pk >= 0",
-        output_fields=["file_name", "file_path", "timestamp"]
+        output_fields=["file_name", "file_path", "upload_date", "file_size", "chunks"]
     )
 
     # Convert timestamp to readable datetime
     for record in results:
-        ts = record.get("timestamp")
-        if ts is not None:
-            record["timestamp"] = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+        if "upload_date" in record and isinstance(record["upload_date"], datetime):
+            record["upload_date"] = record["upload_date"].strftime("%Y-%m-%d %H:%M:%S")
 
     return results
     

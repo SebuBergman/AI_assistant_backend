@@ -1,3 +1,4 @@
+from uuid import uuid4
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -6,7 +7,7 @@ from anthropic import Anthropic
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import Optional
-import datetime
+from datetime import datetime
 import os
 import uvicorn
 import json
@@ -378,8 +379,12 @@ async def upload_pdf(file: UploadFile = File(...)):
     try:
         # Save file temporarily
         file_path = os.path.join(UPLOAD_PATH, file.filename)
+
+        content = await file.read()
+        file_size = len(content)
+        
         with open(file_path, "wb") as f:
-            f.write(await file.read())
+            f.write(content)
         
         # Upload to S3
         bucket_name = os.getenv("S3_BUCKET_NAME")
@@ -389,39 +394,57 @@ async def upload_pdf(file: UploadFile = File(...)):
         # Load and process PDF with LangChain
         loader = PyPDFLoader(file_path)
         documents = loader.load()
+
+        upload_date = datetime.now().isoformat()
+        file_id = str(uuid4())
         
         # Add metadata
         for doc in documents:
-            doc.metadata["file_name"] = file.filename
-            doc.metadata["source"] = s3_url
+            doc.metadata.update({
+                "file_name": file.filename,
+                "source": s3_url,
+                "file_size": file_size,
+                "upload_date": upload_date,
+                "page": doc.metadata.get("page", 0) + 1,  # convert to 1-based
+                "file_id": file_id,
+            })
         
         # Split documents
         splits = text_splitter.split_documents(documents)
+
+        # Add chunk-level metadata
+        for i, doc in enumerate(splits):
+            doc.metadata.update({
+                "chunk_id": f"{file_id}_{i}",
+                "chunk_index": i,
+            })
         
         # Get or initialize vectorstore
         vs = get_vectorstore()
-        
         if vs is None:
-            print("Initializing vectorstore connection...")
-            import vectorstore_manager
-            
+            from vectorstore_manager import vectorstore
             vs = Milvus(
                 embedding_function=embeddings,
                 collection_name=COLLECTION_NAME,
                 connection_args=MILVUS_CONNECTION,
                 consistency_level="Strong",
-                drop_old=False,
                 auto_id=True,
             )
-            vectorstore_manager.vectorstore = vs
-            print("✓ Vectorstore connected to existing collection")
-        
+            vectorstore = vs
+
         # Add documents to vectorstore
         print(f"Adding {len(splits)} documents to vectorstore...")
         vs.add_documents(splits)
         
         # Store PDF metadata in Milvus
-        insert_pdf_metadata(file.filename, s3_url)
+        insert_pdf_metadata(
+            file_name=file.filename,
+            file_path=s3_url,
+            file_size=file_size,
+            upload_date=upload_date,
+            file_id=file_id,
+            chunks=len(splits),
+        )
         
         # Clean up local file
         os.remove(file_path)
@@ -430,6 +453,8 @@ async def upload_pdf(file: UploadFile = File(...)):
             "message": f"Successfully processed {file.filename}",
             "s3_url": s3_url,
             "chunks_created": len(splits),
+            "file_size": file_size,
+            "upload_date": upload_date,
             "collection": COLLECTION_NAME
         }
     
@@ -437,14 +462,63 @@ async def upload_pdf(file: UploadFile = File(...)):
         print(f"Error in upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/fetch_pdfs", tags=["RAG"])
-def get_pdfs():
-    """Get the list of available PDF documents"""
+from fastapi import FastAPI, HTTPException
+from typing import List, Dict, Any
+
+app = FastAPI()
+
+@app.get("/fetch_documents", tags=["RAG"])
+async def fetch_documents():
+    """
+    Fetch all uploaded PDFs with optional chunk data from Milvus
+    """
     try:
-        pdfs = get_pdf_metadata()
-        return {"pdfs": pdfs}
+        # 1️⃣ Fetch PDF metadata
+        documents = get_pdf_metadata()  # should return List[Dict]
+        if not documents:
+            return {"documents": []}
+
+        vs = get_vectorstore()  # Milvus vectorstore
+        results = []
+
+        for doc in documents:
+            # Default empty chunks
+            chunks: List[Dict[str, Any]] = []
+
+            # 2️⃣ Fetch chunk data if vectorstore exists and has data
+            if vs:
+                try:
+                    # Use async query if your vs is AsyncMilvusClient
+                    vector_results = await vs.query(
+                        filter=f'file_id == "{doc["file_id"]}"',
+                        output_fields=["chunk_id", "chunk_index", "page", "content"]
+                    )
+                    
+                    for r in vector_results:
+                        chunks.append({
+                            "chunk_id": r.get("chunk_id"),
+                            "chunk_index": r.get("chunk_index"),
+                            "page": r.get("page"),
+                            "content": r.get("content"),
+                        })
+                except Exception as e:
+                    print(f"Warning: Failed to fetch chunks for {doc['file_name']}: {e}")
+
+            # 3️⃣ Build final document object
+            results.append({
+                "file_name": doc["file_name"],
+                "file_path": doc.get("file_path") or doc.get("source"),
+                "upload_date": doc.get("upload_date") or doc.get("timestamp"),
+                "file_size": doc.get("file_size", 0),
+                "file_id": doc["file_id"],
+                "chunks": chunks,
+            })
+
+        return {"documents": results}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving PDFs: {str(e)}")
+        print(f"Error in fetch_documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/query", tags=["RAG"])
 async def query(request: QueryRequest):
@@ -559,8 +633,18 @@ async def query(request: QueryRequest):
             "answer": answer,
             "search_method": search_method,
             "results_count": len(final_results),
-            "sources": final_results,
-            "context": context,
+            "sources": [
+                {
+                    "chunk_id": r["chunk_id"],
+                    "file_name": r["file_name"],
+                    "page": r["page"],
+                    "content": r["content"],
+                    "score": r["hybrid_score"] if "hybrid_score" in r else r.get("score"),
+                    "search_type": r["search_type"],
+                    "source": r["source"],
+                }
+                for r in final_results
+            ],
             "from_cache": False
         }
     
@@ -690,7 +774,7 @@ def list_cache_entries(limit: int = 10):
         results = sorted(results, key=lambda x: x["timestamp"], reverse=True)
 
         for r in results:
-            r["timestamp"] = datetime.datetime.fromtimestamp(r["timestamp"]).isoformat()
+            r["timestamp"] = datetime.fromtimestamp(r["timestamp"]).isoformat()
 
         return {"entries": results, "count": len(results)}
 
