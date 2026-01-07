@@ -26,6 +26,22 @@ def upload_to_s3(file_path, bucket_name, s3_key):
         print(f"Error uploading to S3: {e}")
         raise
 
+def delete_s3_file(file_name: str):
+    """Delete a specific file from S3."""
+    try:
+        bucket_name = os.getenv("S3_BUCKET_NAME")
+        
+        s3_client.delete_object(
+            Bucket=bucket_name,
+            Key=file_name
+        )
+        
+        print(f"✓ Deleted '{file_name}' from S3")
+        return True
+    except Exception as e:
+        print(f"Error deleting file from S3: {e}")
+        raise
+
 def delete_all_s3_files():
     """Delete all files in the S3 bucket."""
     try:

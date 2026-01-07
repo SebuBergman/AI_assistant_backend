@@ -3,6 +3,7 @@ import time
 import numpy as np
 from dotenv import load_dotenv
 from pymilvus import MilvusClient, DataType
+from datetime import datetime
 
 load_dotenv()
 
@@ -201,27 +202,27 @@ def insert_pdf_metadata(file_name, file_path, embedding=None):
         data=[{
             "file_name": file_name,
             "file_path": file_path,
-            "timestamp": int(time.time()),
-            "embedding": embedding  # MUST include embedding!
+            "timestamp": int(time.time()), # store as int seconds
+            "embedding": embedding  # vector field
         }]
     )
     print(f"✓ Saved PDF metadata for {file_name}")
 
 def get_pdf_metadata():
-    """Return all PDF metadata records."""
+    """Return all PDF metadata records with readable timestamps."""
     results = milvus_client.query(
         collection_name=PDF_COLLECTION,
         filter="pk >= 0",
         output_fields=["file_name", "file_path", "timestamp"]
     )
-    return results
 
-def clear_all_pdfs():
-    """Delete all PDF metadata."""
-    if PDF_COLLECTION in milvus_client.list_collections():
-        milvus_client.drop_collection(PDF_COLLECTION)
-        create_pdf_metadata_collection()
-        print("✓ Cleared all PDF metadata")
+    # Convert timestamp to readable datetime
+    for record in results:
+        ts = record.get("timestamp")
+        if ts is not None:
+            record["timestamp"] = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+    return results
     
 # Query cache operations 
 def store_query_result(query_text, embedding, answer, context):
@@ -269,16 +270,78 @@ def find_similar_cached_query(query_embedding, threshold=0.85):
 
     return None
 
+# Delete operations
+# Single document deletions
+def delete_document_embeddings(file_name: str):
+    """Delete all embeddings for a specific document from Milvus."""
+    try:
+        if MILVUS_COLLECTION_NAME not in milvus_client.list_collections():
+            print(f"Collection '{MILVUS_COLLECTION_NAME}' does not exist.")
+            return 0
+        
+        # Delete entities where source matches the file_name
+        result = milvus_client.delete(
+            collection_name=MILVUS_COLLECTION_NAME,
+            filter=f'source == "{file_name}"'
+        )
+        
+        deleted_count = result.get('delete_count', 0) if isinstance(result, dict) else 0
+        print(f"✓ Deleted {deleted_count} embeddings for document '{file_name}'")
+        return deleted_count
+    except Exception as e:
+        print(f"Error deleting embeddings for '{file_name}': {str(e)}")
+        raise
+
+def delete_pdf_metadata(file_name: str):
+    """Delete PDF metadata for a specific document."""
+    try:
+        if PDF_COLLECTION not in milvus_client.list_collections():
+            print(f"PDF metadata collection does not exist.")
+            return False
+        
+        result = milvus_client.delete(
+            collection_name=PDF_COLLECTION,
+            filter=f'file_name == "{file_name}"'
+        )
+        
+        print(f"✓ Deleted PDF metadata for '{file_name}'")
+        return True
+    except Exception as e:
+        print(f"Error deleting PDF metadata for '{file_name}': {str(e)}")
+        raise
+
+def clear_document_cache(file_name: str):
+    """Clear cache entries for a specific document."""
+    try:
+        if QUERY_CACHE_COLLECTION not in milvus_client.list_collections():
+            print(f"Query cache collection does not exist.")
+            return
+        
+        # Delete cache entries where the response references this document
+        # This assumes your cache stores which documents were used in responses
+        result = milvus_client.delete(
+            collection_name=QUERY_CACHE_COLLECTION,
+            filter=f'source == "{file_name}"'
+        )
+        
+        print(f"✓ Cleared cache entries for document '{file_name}'")
+    except Exception as e:
+        print(f"Error clearing cache for '{file_name}': {e}")
+        # Non-critical error, so we can continue
+
+# Bulk deletions
+def clear_all_pdfs():
+    """Delete all PDF metadata."""
+    if PDF_COLLECTION in milvus_client.list_collections():
+        milvus_client.drop_collection(PDF_COLLECTION)
+        create_pdf_metadata_collection()
+        print("✓ Cleared all PDF metadata")
+
 def clear_cache_entries():
     """Reset entire query cache."""
     milvus_client.drop_collection(QUERY_CACHE_COLLECTION)
     create_query_cache_collection()
     print("✓ Cleared query cache")
-
-
-def get_cache_stats():
-    stats = milvus_client.get_collection_stats(QUERY_CACHE_COLLECTION)
-    return stats
 
 # Clear data functions
 def clear_all_embeddings():
@@ -310,3 +373,7 @@ def get_milvus_collection_stats():
     except Exception as e:
         print(f"Error getting Milvus stats: {str(e)}")
         return {"error": str(e)}
+    
+def get_cache_stats():
+    stats = milvus_client.get_collection_stats(QUERY_CACHE_COLLECTION)
+    return stats
