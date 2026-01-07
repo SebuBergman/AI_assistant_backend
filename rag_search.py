@@ -1,6 +1,6 @@
 from typing import List, Dict
 from vectorstore_manager import get_vectorstore
-from db import milvus_client, MILVUS_COLLECTION_NAME
+from database import milvus_client, MILVUS_COLLECTION_NAME
 
 def _collection_has_field(field_name: str) -> bool:
     try:
@@ -33,7 +33,7 @@ def keyword_search(query: str, file_name: str = None, limit: int = 7) -> List[Di
                 results.append({
                     "chunk_id": doc.metadata.get("chunk_id"),
                     "chunk_index": doc.metadata.get("chunk_index"),
-                    "content": doc.page_content,
+                    "text": doc.page_content,
                     "file_name": doc.metadata.get("file_name", ""),
                     "page": doc.metadata.get("page"),
                     "source": doc.metadata.get("source"),
@@ -77,10 +77,20 @@ def vector_search(query: str, file_name: str = None, limit: int = 7) -> List[Dic
                 # Skip entries that don't match requested file_name
                 if meta_file != file_name:
                     continue
+
+            # Convert COSINE distance [0,2] to similarity score [0,1]
+            # where 0 distance = 1.0 similarity (identical)
+            # and 2 distance = 0.0 similarity (opposite)
+            similarity_score = 1 - (score / 2)
+
             results.append({
-                "content": doc.page_content,
+                "chunk_id": doc.metadata.get("chunk_id"),
+                "chunk_index": doc.metadata.get("chunk_index"),
+                "text": doc.page_content,
                 "file_name": meta_file,
-                "score": float(score),
+                "page": doc.metadata.get("page"),
+                "source": doc.metadata.get("source"),
+                "score": float(similarity_score),
                 "search_type": "vector"
             })
 
@@ -108,7 +118,7 @@ def hybrid_search(
     
     # Merge vector results
     for vec in vector_results:
-        chunk_id = vec["chunk_id"]
+        chunk_id = vec.get("chunk_id")
         if chunk_id in seen_chunks:
             continue
         seen_chunks.add(chunk_id)
@@ -120,7 +130,7 @@ def hybrid_search(
         merged.append({
             "chunk_id": chunk_id,
             "chunk_index": vec.get("chunk_index"),
-            "content": vec["content"],
+            "text": vec["text"],
             "file_name": vec["file_name"],
             "page": vec.get("page"),
             "source": vec.get("source"),
@@ -132,7 +142,7 @@ def hybrid_search(
     
     # Add keyword-only results
     for kw in keyword_results:
-        chunk_id = kw["content"]
+        chunk_id = kw.get("chunk_id")
         if chunk_id in seen_chunks:
             continue
         seen_chunks.add(chunk_id)
@@ -140,7 +150,7 @@ def hybrid_search(
         merged.append({
             "chunk_id": chunk_id,
             "chunk_index": kw.get("chunk_index"),
-            "content": kw["content"],
+            "text": kw["text"],
             "file_name": kw["file_name"],
             "page": kw.get("page"),
             "source": kw.get("source"),
