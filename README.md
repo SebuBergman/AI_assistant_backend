@@ -87,21 +87,44 @@ S3_BUCKET_NAME=<bucket-name>
 
 ### 5. Create local folder
 Windows / Linux / macOS:
-```bash
+```powershell
 mkdir <UPLOAD_PATH>
 ```
 
 ### 6. Run locally
 Windows:
-```bash
+```powershell
 .venv\Scripts\activate
 uvicorn main:app --reload
 ```
 
 Linux / macOS:
-```bash
+```powershell
 source .venv/bin/activate
 uvicorn main:app --reload
+```
+
+## Or run with wsl
+### Step 1: Open WSL (Ubuntu)
+```powershell
+wsl
+```
+
+### Step 2: Build from inside WSL
+Navigate to your backend inside WSL’s filesystem:
+```powershell
+cd ~/projects/AI_assistant_backend
+docker build -t my-backend .
+```
+
+### Step 3: Run you backend
+```powershell
+docker run --env-file .env -p 8000:8000 my-backend
+```
+
+If you made any changes to backend must copy again
+```powershell
+rsync -av --progress --exclude='.git' --exclude='.venv' /mnt/c/Users/SebastianThomasAlexa/Programming/my_project/AI_assistant_backend ~/projects/
 ```
 
 ---
@@ -192,7 +215,8 @@ All sensitive authentication keys go there (rename to .env to not accidentally u
 ## 🛠️ Other Notes
 - Structured and modular FastAPI architecture  
 - Ready for Dockerization  
-- Integrates directly with the frontend for streaming AI responses  
+- Integrates directly with the frontend for streaming AI responses
+- Create requirements.txt with command: uv pip freeze > requirements.txt
 
 ---
 
