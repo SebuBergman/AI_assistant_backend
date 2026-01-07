@@ -1,11 +1,40 @@
 import os
 import time
 import numpy as np
+import ssl
+import asyncio
+import sys
+import asyncpg
+import redis.asyncio as aioredis
+
+from typing import Optional
 from dotenv import load_dotenv
 from pymilvus import MilvusClient, DataType
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 load_dotenv()
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+USE_BACKEND_POOLS = False
+
+# Global connection pools
+_db_pool: Optional[asyncpg.Pool] = None
+_redis_client: Optional[aioredis.Redis] = None
+
+# Cache configuration
+CACHE_KEYS = {
+    "user_chats": lambda user_id: f"chats:user:{user_id}",
+    "chat_meta": lambda chat_id: f"chat:meta:{chat_id}",
+    "chat_messages": lambda chat_id: f"chat:messages:{chat_id}",
+}
+
+CACHE_TTL = {
+    "chats": 300,      # 5 minutes
+    "messages": 300,   # 5 minutes
+}
 
 # Zilliz Cloud / Milvus config
 ZILLIZ_CLOUD_URI = os.getenv("ZILLIZ_CLOUD_URI")
@@ -33,177 +62,136 @@ except Exception as e:
     print(f"✗ Zilliz Cloud connection failed: {e}")
     raise
 
-# Create collections schema's
-def create_milvus_collection():
-    """Create Milvus collection only if it does NOT already exist.
-    Includes explicit file_name field for filtering.
-    """
+# =========================
+# Milvus Collection Helpers
+# =========================
+def ensure_collection_exists(name: str, schema_builder, index_fields: list = []):
+    """Create a collection only if it doesn't exist."""
     try:
         existing = milvus_client.list_collections()
-        if MILVUS_COLLECTION_NAME in existing:
-            print(f"Milvus collection already exists: {MILVUS_COLLECTION_NAME}")
-            return  # <-- STOP. Do NOT recreate or modify.
+        if name in existing:
+            print(f"✓ Collection already exists: {name}")
+            return
 
-        print(f"Creating new collection: {MILVUS_COLLECTION_NAME}")
+        print(f"Creating new collection: {name}")
 
-        # Define schema
-        schema = milvus_client.create_schema(
-            auto_id=True,
-            enable_dynamic_field=True,
-            description="RAG document embeddings collection"
-        )
+        # Create schema using the provided builder
+        schema = schema_builder()
 
-        schema.add_field(
-            field_name="pk",
-            datatype=DataType.INT64,
-            is_primary=True,
-            auto_id=True,
-            description="Primary key"
-        )
-
-        schema.add_field(
-            field_name="vector",
-            datatype=DataType.FLOAT_VECTOR,
-            dim=EMBEDDING_DIM,
-            description="Document embedding vector"
-        )
-
-        schema.add_field(
-            field_name="text",
-            datatype=DataType.VARCHAR,
-            max_length=65535,
-            description="Document text content"
-        )
-
-        schema.add_field(
-            field_name="file_name",
-            datatype=DataType.VARCHAR,
-            max_length=512,
-            description="Original PDF filename / source"
-        )
-
-        # Index
-        index_params = milvus_client.prepare_index_params()
-        index_params.add_index(
-            field_name="vector",
-            index_type="AUTOINDEX",
-            metric_type="COSINE"
-        )
-
-        # Create collection
+        # Create the collection
         milvus_client.create_collection(
-            collection_name=MILVUS_COLLECTION_NAME,
+            collection_name=name,
             schema=schema,
-            index_params=index_params,
             consistency_level="Strong"
         )
 
-        print(f"✓ Created collection '{MILVUS_COLLECTION_NAME}' with file_name field")
+        # Add indexes
+        if index_fields:
+            index_params = milvus_client.prepare_index_params()
+            for field_name, index_type, metric_type in index_fields:
+                index_params.add_index(
+                    field_name=field_name,
+                    index_type=index_type,
+                    metric_type=metric_type
+                )
+            milvus_client.create_index(collection_name=name, index_params=index_params)
 
         # Load collection
-        milvus_client.load_collection(MILVUS_COLLECTION_NAME)
-        print(f"✓ Loaded collection '{MILVUS_COLLECTION_NAME}'")
-
+        milvus_client.load_collection(name)
+        print(f"✓ Collection '{name}' created and loaded successfully")
     except Exception as e:
-        print(f"Error creating Milvus collection: {e}")
+        print(f"Error creating collection '{name}': {e}")
         raise
 
-def create_pdf_metadata_collection():
-    if PDF_COLLECTION in milvus_client.list_collections():
-        return
+# =========================
+# Schema Builders
+# =========================
 
-    schema = milvus_client.create_schema(auto_id=True, description="PDF metadata")
+def build_embeddings_schema():
+    schema = milvus_client.create_schema(
+        auto_id=True, enable_dynamic_field=True, description="RAG document embeddings"
+    )
+    schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=True)
+    schema.add_field("text", DataType.VARCHAR, max_length=65535)
+    schema.add_field("vector", DataType.FLOAT_VECTOR, dim=EMBEDDING_DIM)
+    schema.add_field("file_name", DataType.VARCHAR, max_length=512)
+    schema.add_field("chunk_id", DataType.VARCHAR, max_length=128)
+    schema.add_field("chunk_index", DataType.INT64)
+    schema.add_field("page", DataType.INT64)
+    schema.add_field("file_size", DataType.INT64)
+    schema.add_field("upload_date", DataType.VARCHAR, max_length=32)
+    schema.add_field("file_id", DataType.VARCHAR, max_length=128)
+    return schema
+
+def build_pdf_metadata_schema():
+    schema = milvus_client.create_schema(
+        auto_id=True, description="PDF metadata"
+    )
     schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=True)
     schema.add_field("file_name", DataType.VARCHAR, max_length=512)
     schema.add_field("file_path", DataType.VARCHAR, max_length=1024)
-    schema.add_field("timestamp", DataType.INT64)
-    
-    # Add vector field
+    schema.add_field("upload_date", DataType.VARCHAR, max_length=32)
+    schema.add_field("file_size", DataType.INT64)
+    schema.add_field("chunks", DataType.INT64)
+    schema.add_field("file_id", DataType.VARCHAR, max_length=128)
     schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=384)
+    return schema
 
-    # Create collection
-    milvus_client.create_collection(
-        collection_name=PDF_COLLECTION,
-        schema=schema,
-        consistency_level="Strong"
+def build_query_cache_schema():
+    schema = milvus_client.create_schema(
+        auto_id=True, description="Query cache"
     )
-
-    # Create index - MUST be done BEFORE loading
-    index_params = milvus_client.prepare_index_params()
-    index_params.add_index(
-        field_name="embedding",
-        index_type="AUTOINDEX",
-        metric_type="COSINE"
-    )
-    milvus_client.create_index(
-        collection_name=PDF_COLLECTION,
-        index_params=index_params
-    )
-    
-    # Wait for index to be created
-    time.sleep(2)
-    
-    # Now load the collection
-    milvus_client.load_collection(PDF_COLLECTION)
-
-    print("✓ Created pdf_metadata collection")
-
-def create_query_cache_collection():
-    if QUERY_CACHE_COLLECTION in milvus_client.list_collections():
-        return
-
-    schema = milvus_client.create_schema(auto_id=True, description="Query cache")
     schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=True)
     schema.add_field("query", DataType.VARCHAR, max_length=2048)
     schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=EMBEDDING_DIM)
     schema.add_field("answer", DataType.VARCHAR, max_length=65535)
     schema.add_field("context", DataType.VARCHAR, max_length=65535)
     schema.add_field("timestamp", DataType.INT64)
+    return schema
 
-    # STEP 1: Create collection with no index first
-    milvus_client.create_collection(
-        collection_name=QUERY_CACHE_COLLECTION,
-        schema=schema,
-        consistency_level="Strong"
-    )
+# =========================
+# Ensure All Collections Exist
+# =========================
 
-    # STEP 2: Now create index
-    index_params = milvus_client.prepare_index_params()
-    index_params.add_index(
-        field_name="embedding",
-        index_type="AUTOINDEX",
-        metric_type="COSINE"
-    )
-    milvus_client.create_index(
-        collection_name=QUERY_CACHE_COLLECTION,
-        index_params=index_params
-    )
+# Embeddings
+ensure_collection_exists(
+    MILVUS_COLLECTION_NAME,
+    build_embeddings_schema,
+    index_fields=[("vector", "AUTOINDEX", "COSINE")]
+)
 
-    # STEP 3: Load collection
-    milvus_client.load_collection(QUERY_CACHE_COLLECTION)
+# PDF Metadata
+ensure_collection_exists(
+    PDF_COLLECTION,
+    build_pdf_metadata_schema,
+    index_fields=[("embedding", "AUTOINDEX", "COSINE")]
+)
 
-    print("✓ Created query_cache collection")
+# Query Cache
+ensure_collection_exists(
+    QUERY_CACHE_COLLECTION,
+    build_query_cache_schema,
+    index_fields=[("embedding", "AUTOINDEX", "COSINE")]
+)
 
-# Ensure collections exist
-create_milvus_collection()
-create_pdf_metadata_collection()
-create_query_cache_collection()
 
 # PDF Metadata operations
-def insert_pdf_metadata(file_name, file_path, embedding=None):
+def insert_pdf_metadata(file_name, file_path, file_size, upload_date, file_id, chunks, embedding=None):
     """Store PDF metadata into Milvus."""
-    
-    # If no embedding provided, create a dummy one (or generate a real one)
+
     if embedding is None:
-        embedding = [0.0] * 384  # Dummy embedding - replace with actual embeddings!
-    
+        embedding = [0.0] * 384  # Dummy embedding if no vector available
+
     milvus_client.insert(
         collection_name=PDF_COLLECTION,
         data=[{
             "file_name": file_name,
             "file_path": file_path,
-            "timestamp": int(time.time()), # store as int seconds
-            "embedding": embedding  # vector field
+            "upload_date": upload_date,
+            "file_size": file_size,
+            "chunks": chunks,
+            "file_id": file_id,
+            "embedding": embedding
         }]
     )
     print(f"✓ Saved PDF metadata for {file_name}")
@@ -213,14 +201,13 @@ def get_pdf_metadata():
     results = milvus_client.query(
         collection_name=PDF_COLLECTION,
         filter="pk >= 0",
-        output_fields=["file_name", "file_path", "timestamp"]
+        output_fields=["file_name", "file_path", "upload_date", "file_size", "chunks", "file_id"]
     )
 
     # Convert timestamp to readable datetime
     for record in results:
-        ts = record.get("timestamp")
-        if ts is not None:
-            record["timestamp"] = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+        if "upload_date" in record and isinstance(record["upload_date"], datetime):
+            record["upload_date"] = record["upload_date"].strftime("%Y-%m-%d %H:%M:%S")
 
     return results
     
@@ -334,13 +321,13 @@ def clear_all_pdfs():
     """Delete all PDF metadata."""
     if PDF_COLLECTION in milvus_client.list_collections():
         milvus_client.drop_collection(PDF_COLLECTION)
-        create_pdf_metadata_collection()
+        build_pdf_metadata_schema()
         print("✓ Cleared all PDF metadata")
 
 def clear_cache_entries():
     """Reset entire query cache."""
     milvus_client.drop_collection(QUERY_CACHE_COLLECTION)
-    create_query_cache_collection()
+    build_query_cache_schema()
     print("✓ Cleared query cache")
 
 # Clear data functions
@@ -355,7 +342,7 @@ def clear_all_embeddings():
             print(f"Collection '{MILVUS_COLLECTION_NAME}' does not exist.")
         
         # Recreate the collection
-        create_milvus_collection()
+        build_embeddings_schema()
         return True
     except Exception as e:
         print(f"Error clearing all embeddings: {str(e)}")
@@ -377,3 +364,117 @@ def get_milvus_collection_stats():
 def get_cache_stats():
     stats = milvus_client.get_collection_stats(QUERY_CACHE_COLLECTION)
     return stats
+
+
+# Database connection pool management for Supabase/PostgreSQL
+async def init_db_pool():
+    """
+    Initialize the PostgreSQL connection pool with SSL verification using a
+    custom CA (Option 2). Suitable for production with Supabase.
+    """
+    if not USE_BACKEND_POOLS:
+        print("⚠️ Skipping backend DB pool initialization")
+        return None
+
+    global _db_pool
+
+    if _db_pool is None:
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise ValueError("DATABASE_URL not set")
+
+        # Optional: path to Supabase root CA certificate
+        # Download from https://supabase.com/docs/reference/cli or dashboard
+        supabase_ca_path = os.getenv("SUPABASE_CA_PATH", "supabase-ca.pem")
+
+        ssl_context = ssl.create_default_context(cafile=supabase_ca_path)
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+        _db_pool = await asyncpg.create_pool(
+            database_url,
+            ssl=ssl_context,
+            min_size=5,
+            max_size=20,
+            command_timeout=60,
+        )
+
+        print("✅ Database pool initialized with verified SSL")
+
+    return _db_pool
+
+
+async def close_db_pool():
+    """Close the database connection pool"""
+    global _db_pool
+
+    if _db_pool is not None:
+        await _db_pool.close()
+        _db_pool = None
+        print("Database pool closed")
+
+
+async def get_db_pool() -> asyncpg.Pool:
+    """Get the database connection pool"""
+    if _db_pool is None:
+        await init_db_pool()
+    return _db_pool
+
+
+#Redis connection management
+async def init_redis():
+    if not USE_BACKEND_POOLS:
+        print("⚠️ Skipping backend DB pool initialization")
+        return None
+    
+    global _redis_client
+
+    if _redis_client is None:
+        host = os.getenv("REDIS_HOST")
+        port = os.getenv("REDIS_PORT")
+        password = os.getenv("REDIS_PASSWORD")
+
+        if not host or not port:
+            raise ValueError("REDIS_HOST and REDIS_PORT must be set")
+
+        _redis_client = aioredis.Redis(
+            host=host,
+            port=int(port),
+            password=password,
+            username="default",
+            decode_responses=True,
+        )
+
+        await _redis_client.ping()
+        print("Redis client initialized")
+
+async def close_redis():
+    """Close Redis connection"""
+    global _redis_client
+    
+    if _redis_client is not None:
+        await _redis_client.close()
+        _redis_client = None
+        print("Redis client closed")
+
+async def get_redis_client() -> aioredis.Redis:
+    """Get Redis client"""
+    if _redis_client is None:
+        await init_redis()
+    return _redis_client
+
+# Context manager for FastAPI lifespan
+@asynccontextmanager
+async def lifespan(app):
+    """FastAPI lifespan context manager"""
+    # Startup
+    await init_db_pool()
+    await init_redis()
+    print("Application started, connections initialized")
+    
+    yield
+    
+    # Shutdown
+    await close_db_pool()
+    await close_redis()
+    print("Application shutdown, connections closed")

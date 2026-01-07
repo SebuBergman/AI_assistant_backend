@@ -1,40 +1,53 @@
-from openai import OpenAI
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
 
 class EmailRequest(BaseModel):
     email: str
     tone: str
 
-def rewrite_email(request: EmailRequest, openai_client: OpenAI):
-    """Receives an email text and rewrites it."""
-    try:
-        email = request.email
-        email_tone = request.tone
+async def rewrite_email_stream(request: EmailRequest):
+    email = request.email
+    tone = request.tone
 
-        system_prompt = f"""
-        I want you to act as an email assistant. I want you to rewrite the email text provided in a chosen tone.
-        
-        Email Text:
-        {email}
+    print(f"Email: {email}")
+    print(f"Tone: {tone}")
 
-        The tone of the email is: {email_tone}.
+    prompt = f"""
+    Rewrite the following email in the tone: {tone}
 
-        Rules:
-        - I want you to write an email in the tone that is given.
-        - Use a basic email template. Make the email structure fit the tone.
-        """
+    Email:
+    {email}
 
+    Rules:
+    - Match the requested tone.
+    - Use an appropriate email structure.
+    """
+
+    print(f"Prompt: {prompt}")
+
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        streaming=True
+    )
+
+    messages = [("user", prompt)]
+
+    async def stream_generator():
         try:
-            openai_response = openai_client.chat.completions.create(
-                model="gpt-4.1-mini",
-                messages=[{"role": "user", "content": system_prompt}],
-                temperature=0.5,
-            )
-            rewritten_email = openai_response.choices[0].message.content
+            async for chunk in llm.astream(messages):
+                if hasattr(chunk, 'content') and chunk.content:
+                    # Send as JSON object
+                    import json
+                    yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+            
+            yield f"data: {json.dumps({'done': True})}\n\n"
+
         except Exception as e:
-            print(f"OpenAI API error: {str(e)}")
-            rewritten_email = "I encountered an error while processing your question."
-        return {"rewritten_email": rewritten_email}
-    except Exception as e:
-        print(f"Error in email rewrite: {str(e)}")
-        raise
+            print(f"Stream error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            import json
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")

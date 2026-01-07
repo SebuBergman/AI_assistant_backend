@@ -1,3 +1,11 @@
+import os
+import uvicorn
+import json
+import boto3
+import spacy
+import warnings
+
+from uuid import uuid4
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -5,15 +13,10 @@ from openai import OpenAI
 from anthropic import Anthropic
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from typing import Optional
-import datetime
-import os
-import uvicorn
-import json
-import boto3
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 
-# Your existing imports
-from email_assistant import rewrite_email, EmailRequest
+from email_assistant import rewrite_email_stream, EmailRequest
 from ai_assistant import ask_ai, AI_Request
 from tools import is_tool_supported
 
@@ -22,9 +25,13 @@ from pymilvus import MilvusClient
 from langchain_community.vectorstores import Milvus
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import SpacyTextSplitter
 
-from db import (
+# Redis & Supabase DB imports
+from database import lifespan
+from routers import chats
+
+from database import (
     QUERY_CACHE_COLLECTION,
     delete_document_embeddings,
     delete_pdf_metadata,
@@ -53,10 +60,31 @@ from vectorstore_manager import (
     reset_vectorstore
 )
 
+# Import chat title router
+from chat_title import router as chat_title_router
+
 load_dotenv()
 
-# FastAPI app initialization
-app = FastAPI()
+# Create FastAPI app with lifespan
+app = FastAPI(
+    title="Chat API",
+    description="Chat service API with Milvus, PostgreSQL and Redis",
+    version="1.0.8",
+    lifespan=lifespan
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        # Add your production domains
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # API Keys
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -93,19 +121,16 @@ s3_client = boto3.client(
     region_name=os.getenv("AWS_REGION"),
 )
 
-# Text splitter
-text_splitter = RecursiveCharacterTextSplitter(
+# Load spaCy with only the sentencizer (faster and no warnings)
+nlp = spacy.blank("en")
+nlp.add_pipe("sentencizer")
+
+warnings.filterwarnings("ignore", message=".*W108.*")
+
+text_splitter = SpacyTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
-)
-
-# CORS configuration - Combined both origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    pipeline="en_core_web_sm",
 )
 
 # ============================================================================
@@ -116,7 +141,7 @@ class ChatRequest(BaseModel):
     model: str
     prompt: str
     temperature: float = 0.7
-    max_tokens: int = 10240
+    max_tokens: int = 20240
 
 class QueryRequest(BaseModel):
     question: str
@@ -130,7 +155,7 @@ class ExtendedAI_Request(BaseModel):
     model: str
     prompt: str
     temperature: float = 0.7
-    max_tokens: int = 10240
+    max_tokens: int = 20240
     ragEnabled: bool = False
     file_name: Optional[str] = ""
     keyword: Optional[str] = ""
@@ -191,17 +216,20 @@ def get_rag_context(question: str, file_name: str = "", keyword: str = "",
         # Build context from results
         context_lines = []
         for i, result in enumerate(final_results):
+            # ✅ Use .get() with fallback to handle both 'text' and 'content' fields
+            content = result.get('text') or result.get('content', '')
+            
             if search_method == "hybrid":
                 context_lines.append(
                     f"Document {i+1} (Hybrid: {result['hybrid_score']:.3f})\n"
                     f"File: {result['file_name']}\n"
-                    f"{result['content']}\n"
+                    f"{content}\n"
                 )
             else:
                 context_lines.append(
                     f"Document {i+1} (Score: {result['score']:.3f})\n"
                     f"File: {result['file_name']}\n"
-                    f"{result['content']}\n"
+                    f"{content}\n"
                 )
         
         context = "\n".join(context_lines)
@@ -212,21 +240,76 @@ def get_rag_context(question: str, file_name: str = "", keyword: str = "",
         return None, f"Error: {str(e)}"
 
 # ============================================================================
+# ROUTERS - Include all feature routers
+# ============================================================================
+
+# Chat endpoints (includes title generation)
+app.include_router(chat_title_router, prefix="/chat", tags=["Chat"])
+app.include_router(chats.router, prefix="/api/chats", tags=["Chats"])
+
+# ============================================================================
+# ENDPOINTS - General
+# ============================================================================
+
+@app.get("/", tags=["General"])
+def read_root():
+    return {
+        "message": "Welcome to the AI Assistant API with RAG Support!",
+        "version": "1.0.0",
+        "endpoints": {
+            "chat": "/chat/*",
+            "email": "/email_assistant",
+            "ai": "/api/*",
+            "rag": "/upload, /query, /fetch_pdfs",
+            "cache": "/cache/*",
+            "milvus": "/milvus/*",
+            "management": "/delete_document, /clear_all"
+        }
+    }
+
+@app.get("/health", tags=["General"])
+async def health_check():
+    """Health check endpoint to verify connections and database status"""
+    from services.chat_service import ChatService
+    
+    try:
+        vs = get_vectorstore()
+        milvus_status = "connected" if vs is not None else "disconnected"
+        stats = get_milvus_collection_stats()
+        db_status = await ChatService.test_connection()
+        
+        return {
+            "status": "healthy",
+            "milvus": milvus_status,
+            "collection": COLLECTION_NAME,
+            "stats": stats,
+            "database": "connected" if db_status else "disconnected"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+
+# ============================================================================
+# ENDPOINTS - Email Assistant
+# ============================================================================
+
+@app.post("/email_assistant", tags=["Email"])
+async def email_assistant_endpoint(request: EmailRequest):
+    """Rewrite emails in different tones"""
+    try:
+        return await rewrite_email_stream(request)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
 # ENDPOINTS - AI Assistant
 # ============================================================================
 
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the AI Assistant API with RAG Support!"}
-
-@app.post("/email_assistant")
-async def email_assistant_endpoint(request: EmailRequest):
-    try:
-        return rewrite_email(request, openai_client)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/generate")
+@app.post("/api/generate", tags=["AI Assistant"])
 async def ask_ai_endpoint(request: ExtendedAI_Request):
     """Unified streaming generator with optional RAG support"""
     
@@ -234,6 +317,7 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
         try:
             # Prepare the prompt
             prompt = request.prompt
+            references = []
             
             # If RAG is enabled, fetch context and augment prompt
             if request.ragEnabled:
@@ -246,6 +330,34 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                 )
                 
                 if context:
+                    # Parse context into structured references for frontend
+                    # Context format: "Document 1 (Score: 0.85)\nFile: example.pdf\nContent here...\n"
+                    context_lines = context.split('\n\n')
+                    for doc_block in context_lines:
+                        if doc_block.strip():
+                            lines = doc_block.split('\n')
+                            if len(lines) >= 3:
+                                # Extract document info
+                                doc_header = lines[0]  # "Document 1 (Score: 0.85)" or "Document 1 (Hybrid: 0.85)"
+                                file_line = lines[1]    # "File: example.pdf"
+                                content = '\n'.join(lines[2:])  # Rest is content
+                                
+                                # Parse file name
+                                file_name = file_line.replace('File: ', '').strip()
+                                
+                                # Parse score
+                                score = None
+                                if 'Score:' in doc_header:
+                                    score = doc_header.split('Score:')[1].strip().rstrip(')')
+                                elif 'Hybrid:' in doc_header:
+                                    score = doc_header.split('Hybrid:')[1].strip().rstrip(')')
+                                
+                                references.append({
+                                    'file_name': file_name,
+                                    'content': content[:500],  # Truncate for preview
+                                    'score': score
+                                })
+                    
                     # Augment the prompt with RAG context
                     prompt = f"""Use the following context to help answer the question.
                     If the context is relevant, use it. If not, answer based on your knowledge.
@@ -256,8 +368,15 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                     Question: {request.prompt}
 
                     Answer:"""
-                    # Send a metadata message about RAG being used
-                    yield f"data: {json.dumps({'metadata': {'rag_enabled': True, 'search_method': search_method}})}\n\n"
+                    
+                    # Send metadata with structured references
+                    yield f"data: {json.dumps({
+                        'metadata': {
+                            'rag_enabled': True, 
+                            'search_method': search_method,
+                            'references': references
+                        }
+                    })}\n\n"
             
             # Create a modified request with the augmented prompt
             ai_request = AI_Request(
@@ -300,14 +419,14 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
             "X-Accel-Buffering": "no",
         }
     )
-    
-@app.get("/api/models")
+
+@app.get("/api/models", tags=["AI Assistant"])
 async def list_models():
-    """Get list of available models"""
+    """Get list of available AI models"""
     from ai_assistant import MODEL_FUNCTIONS
     return {"models": list(MODEL_FUNCTIONS.keys())}
 
-@app.get("/api/tools/{model_name}")
+@app.get("/api/tools/{model_name}", tags=["AI Assistant"])
 async def check_tool_support(model_name: str):
     """Check if a specific model supports tool calling"""
     return {
@@ -316,37 +435,21 @@ async def check_tool_support(model_name: str):
     }
 
 # ============================================================================
-# ENDPOINTS - RAG System
+# ENDPOINTS - RAG / Document Management
 # ============================================================================
 
-@app.get("/health")
-def health_check():
-    """Health check endpoint to verify connections"""
-    try:
-        vs = get_vectorstore()
-        milvus_status = "connected" if vs is not None else "disconnected"
-        stats = get_milvus_collection_stats()
-        
-        return {
-            "status": "healthy",
-            "milvus": milvus_status,
-            "collection": COLLECTION_NAME,
-            "stats": stats
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-
-@app.post("/upload")
+@app.post("/upload", tags=["RAG"])
 async def upload_pdf(file: UploadFile = File(...)):
-    """Upload and process a PDF"""
+    """Upload and process a PDF document"""
     try:
         # Save file temporarily
         file_path = os.path.join(UPLOAD_PATH, file.filename)
+
+        content = await file.read()
+        file_size = len(content)
+        
         with open(file_path, "wb") as f:
-            f.write(await file.read())
+            f.write(content)
         
         # Upload to S3
         bucket_name = os.getenv("S3_BUCKET_NAME")
@@ -356,39 +459,57 @@ async def upload_pdf(file: UploadFile = File(...)):
         # Load and process PDF with LangChain
         loader = PyPDFLoader(file_path)
         documents = loader.load()
+
+        upload_date = datetime.now().isoformat()
+        file_id = str(uuid4())
         
         # Add metadata
         for doc in documents:
-            doc.metadata["file_name"] = file.filename
-            doc.metadata["source"] = s3_url
+            doc.metadata.update({
+                "file_name": file.filename,
+                "source": s3_url,
+                "file_size": file_size,
+                "upload_date": upload_date,
+                "page": doc.metadata.get("page", 0) + 1,  # convert to 1-based
+                "file_id": file_id,
+            })
         
         # Split documents
         splits = text_splitter.split_documents(documents)
+
+        # Add chunk-level metadata
+        for i, doc in enumerate(splits):
+            doc.metadata.update({
+                "chunk_id": f"{file_id}_{i}",
+                "chunk_index": i,
+            })
         
         # Get or initialize vectorstore
         vs = get_vectorstore()
-        
         if vs is None:
-            print("Initializing vectorstore connection...")
-            import vectorstore_manager
-            
+            from vectorstore_manager import vectorstore
             vs = Milvus(
                 embedding_function=embeddings,
                 collection_name=COLLECTION_NAME,
                 connection_args=MILVUS_CONNECTION,
                 consistency_level="Strong",
-                drop_old=False,
                 auto_id=True,
             )
-            vectorstore_manager.vectorstore = vs
-            print("✓ Vectorstore connected to existing collection")
-        
+            vectorstore = vs
+
         # Add documents to vectorstore
         print(f"Adding {len(splits)} documents to vectorstore...")
         vs.add_documents(splits)
         
         # Store PDF metadata in Milvus
-        insert_pdf_metadata(file.filename, s3_url)
+        insert_pdf_metadata(
+            file_name=file.filename,
+            file_path=s3_url,
+            file_size=file_size,
+            upload_date=upload_date,
+            file_id=file_id,
+            chunks=len(splits),
+        )
         
         # Clean up local file
         os.remove(file_path)
@@ -397,23 +518,72 @@ async def upload_pdf(file: UploadFile = File(...)):
             "message": f"Successfully processed {file.filename}",
             "s3_url": s3_url,
             "chunks_created": len(splits),
+            "file_size": file_size,
+            "upload_date": upload_date,
             "collection": COLLECTION_NAME
         }
     
     except Exception as e:
         print(f"Error in upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/fetch_pdfs")
-def get_pdfs():
-    """Get the list of available PDFs."""
-    try:
-        pdfs = get_pdf_metadata()
-        return {"pdfs": pdfs}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving PDFs: {str(e)}")
 
-@app.post("/query")
+@app.get("/fetch_documents", tags=["RAG"])
+async def fetch_documents():
+    """
+    Fetch all uploaded PDFs with optional chunk data from Milvus
+    """
+    try:
+        # 1️⃣ Fetch PDF metadata
+        documents = get_pdf_metadata()  # should return List[Dict]
+        if not documents:
+            return {"documents": []}
+
+        vs = get_vectorstore()  # Milvus vectorstore
+        results = []
+
+        for doc in documents:
+            # Default empty chunks
+            chunks: List[Dict[str, Any]] = []
+
+            # 2️⃣ Fetch chunk data if vectorstore exists and has data
+            if vs:
+                try:
+                    # Access the underlying Milvus client
+                    milvus_client = vs.col  # or vs.client depending on your LangChain version
+                    
+                    # Use async query if your vs is AsyncMilvusClient
+                    vector_results = milvus_client.query(
+                        expr=f'file_id == "{doc["file_id"]}"',
+                        output_fields=["chunk_id", "chunk_index", "page", "text"]
+                    )
+                    
+                    for r in vector_results:
+                        chunks.append({
+                            "chunk_id": r.get("chunk_id"),
+                            "chunk_index": r.get("chunk_index"),
+                            "page": r.get("page"),
+                            "content": r.get("text"),
+                        })
+                except Exception as e:
+                    print(f"Warning: Failed to fetch chunks for {doc['file_name']}: {e}")
+
+            # 3️⃣ Build final document object
+            results.append({
+                "file_name": doc["file_name"],
+                "file_path": doc.get("file_path") or doc.get("source"),
+                "upload_date": doc.get("upload_date") or doc.get("timestamp"),
+                "file_size": doc.get("file_size", 0),
+                "file_id": doc["file_id"],
+                "chunks": chunks,
+            })
+
+        return {"documents": results}
+
+    except Exception as e:
+        print(f"Error in fetch_documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/query", tags=["RAG"])
 async def query(request: QueryRequest):
     """Query the RAG system with custom Milvus caching"""
     try:
@@ -526,8 +696,18 @@ async def query(request: QueryRequest):
             "answer": answer,
             "search_method": search_method,
             "results_count": len(final_results),
-            "sources": final_results,
-            "context": context,
+            "sources": [
+                {
+                    "chunk_id": r["chunk_id"],
+                    "file_name": r["file_name"],
+                    "page": r["page"],
+                    "content": r["content"],
+                    "score": r["hybrid_score"] if "hybrid_score" in r else r.get("score"),
+                    "search_type": r["search_type"],
+                    "source": r["source"],
+                }
+                for r in final_results
+            ],
             "from_cache": False
         }
     
@@ -535,87 +715,7 @@ async def query(request: QueryRequest):
         print(f"Error in query: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ============================================================================
-# ENDPOINTS - Cache Management
-# ============================================================================
-
-@app.get("/cache/stats")
-def cache_stats_endpoint():
-    """Endpoint to return cache stats."""
-    try:
-        stats = db_get_cache_stats()
-        if "error" in stats:
-            raise HTTPException(status_code=500, detail=stats["error"])
-        return stats
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/cache/clear_old")
-def clear_old_cache_entries_endpoint(days: int = 30):
-    """Clear cache entries older than specified days (default: 30)."""
-    try:
-        if days <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Days parameter must be positive"
-            )
-            
-        deleted_count = clear_cache_entries(days=days)
-        return {
-            "status": "success",
-            "message": f"Deleted {deleted_count} entries older than {days} days",
-            "deleted_count": deleted_count,
-            "days": days
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error clearing old cache entries: {str(e)}"
-        )
-
-@app.post("/cache/clear_all")
-def clear_whole_cache():
-    """Clear ALL cache entries."""
-    try:
-        deleted_count = clear_cache_entries()
-        return {
-            "status": "success",
-            "message": f"Deleted all {deleted_count} cache entries",
-            "deleted_count": deleted_count
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error clearing cache: {str(e)}"
-        )
-
-@app.get("/cache/entries")
-def list_cache_entries(limit: int = 10):
-    """List recent cached queries from Milvus."""
-    try:
-        results = milvus_client.query(
-            collection_name=QUERY_CACHE_COLLECTION,
-            filter="pk >= 0",
-            output_fields=["query", "answer", "timestamp"],
-            limit=limit
-        )
-
-        results = sorted(results, key=lambda x: x["timestamp"], reverse=True)
-
-        for r in results:
-            r["timestamp"] = datetime.datetime.fromtimestamp(r["timestamp"]).isoformat()
-
-        return {"entries": results, "count": len(results)}
-
-    except Exception as e:
-        print(f"Error listing cache entries: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ============================================================================
-# ENDPOINTS - Data Management
-# ============================================================================
-
-@app.post("/delete_document")
+@app.post("/delete_document", tags=["RAG"])
 async def delete_document(request: dict):
     """Delete a specific document (embeddings, PDF metadata, and S3 file)"""
     try:
@@ -646,10 +746,10 @@ async def delete_document(request: dict):
     except Exception as e:
         print(f"Error deleting document: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-   
-@app.post("/clear_all")
+
+@app.post("/clear_all", tags=["RAG"])
 async def clear_all():
-    """Clear all data (embeddings, PDFs, and S3)"""
+    """Clear all data (embeddings, PDFs, cache, and S3)"""
     try:
         embeddings_cleared = clear_all_embeddings()
         reset_vectorstore()
@@ -669,7 +769,87 @@ async def clear_all():
         print(f"Error clearing data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/milvus/stats")
+# ============================================================================
+# ENDPOINTS - Cache Management
+# ============================================================================
+
+@app.get("/cache/stats", tags=["Cache"])
+def cache_stats_endpoint():
+    """Get cache statistics"""
+    try:
+        stats = db_get_cache_stats()
+        if "error" in stats:
+            raise HTTPException(status_code=500, detail=stats["error"])
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/cache/clear_old", tags=["Cache"])
+def clear_old_cache_entries_endpoint(days: int = 30):
+    """Clear cache entries older than specified days (default: 30)"""
+    try:
+        if days <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Days parameter must be positive"
+            )
+            
+        deleted_count = clear_cache_entries(days=days)
+        return {
+            "status": "success",
+            "message": f"Deleted {deleted_count} entries older than {days} days",
+            "deleted_count": deleted_count,
+            "days": days
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error clearing old cache entries: {str(e)}"
+        )
+
+@app.post("/cache/clear_all", tags=["Cache"])
+def clear_whole_cache():
+    """Clear ALL cache entries"""
+    try:
+        deleted_count = clear_cache_entries()
+        return {
+            "status": "success",
+            "message": f"Deleted all {deleted_count} cache entries",
+            "deleted_count": deleted_count
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error clearing cache: {str(e)}"
+        )
+
+@app.get("/cache/entries", tags=["Cache"])
+def list_cache_entries(limit: int = 10):
+    """List recent cached queries from Milvus"""
+    try:
+        results = milvus_client.query(
+            collection_name=QUERY_CACHE_COLLECTION,
+            filter="pk >= 0",
+            output_fields=["query", "answer", "timestamp"],
+            limit=limit
+        )
+
+        results = sorted(results, key=lambda x: x["timestamp"], reverse=True)
+
+        for r in results:
+            r["timestamp"] = datetime.fromtimestamp(r["timestamp"]).isoformat()
+
+        return {"entries": results, "count": len(results)}
+
+    except Exception as e:
+        print(f"Error listing cache entries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# ENDPOINTS - Milvus Management
+# ============================================================================
+
+@app.get("/milvus/stats", tags=["Milvus"])
 def milvus_stats():
     """Get Milvus/Zilliz collection statistics"""
     try:
@@ -678,11 +858,11 @@ def milvus_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/milvus/schema")
+@app.get("/milvus/schema", tags=["Milvus"])
 def get_collection_schema():
     """Get the current collection schema to verify it's correct"""
     try:
-        from db import milvus_client, MILVUS_COLLECTION_NAME
+        from database import milvus_client, MILVUS_COLLECTION_NAME
         
         if MILVUS_COLLECTION_NAME not in milvus_client.list_collections():
             return {

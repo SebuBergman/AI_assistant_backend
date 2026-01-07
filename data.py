@@ -1,11 +1,12 @@
 valid_gpt_models = {
-  "gpt-5": "GPT-5 (Advanced reasoning and creativity with expert-level responses)",
-  "gpt-5-mini": "GPT-5 Mini (Fast, efficient, and concise with solid reasoning)",
-  "gpt-5-nano": "GPT-5 Nano (Ultra-light, delivers brief 1–2 sentence answers)",
-  "gpt-4.1": "GPT-4.1 (Comprehensive answers with professional tone)",
-  "gpt-4.1-mini": "GPT-4.1 Mini (Concise but informative responses)",
-  "gpt-4.1-nano": "GPT-4.1 Nano (Very short 1-2 sentence answers)",
-  "gpt-4o": "GPT-4o (Sophisticated, nuanced responses)",
+  "gpt-5.2": "GPT-5.2 — state-of-the-art assistant with superior reasoning, deeper contextual understanding, and enhanced creative problem-solving for expert-level results.",
+  "gpt-5.1": "GPT-5.1 — high-performance assistant offering advanced reasoning, dependable creativity, and practical expertise for complex tasks.",
+  "gpt-5-mini": "GPT-5 Mini — Fast, efficient, and concise with solid reasoning)",
+  "gpt-5-nano": "GPT-5 Nano — Ultra-light, delivers brief 1–2 sentence answers)",
+  "gpt-4.1": "GPT-4.1 — Comprehensive answers with professional tone)",
+  "gpt-4.1-mini": "GPT-4.1 Mini — Concise but informative responses)",
+  "gpt-4.1-nano": "GPT-4.1 Nano — Very short 1-2 sentence answers)",
+  "gpt-4o": "GPT-4o — Sophisticated, nuanced responses)",
 }
 
 valid_claude_models = {
@@ -16,7 +17,8 @@ valid_claude_models = {
 }
 
 supports_tools = {
-  "gpt-5",
+  "gpt-5.2",
+  "gpt-5.1",
   "gpt-4.1",
   "gpt-4o",
   "claude-sonnet-4-5",
@@ -28,7 +30,8 @@ supports_tools = {
 supports_tools_true_false = {
   "deepseek-reasoner" : "false",
   "deepseek-chat" : "false (for now)",
-  "gpt-5" : "true",
+  "gpt-5.2" : "true",
+  "gpt-5.1" : "true",
   "gpt-5-mini" : "false",
   "gpt-5-nano" : "false",
   "gpt-4.1" : "true",

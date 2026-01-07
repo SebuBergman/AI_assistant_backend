@@ -1,6 +1,6 @@
 from typing import List, Dict
 from vectorstore_manager import get_vectorstore
-from db import milvus_client, MILVUS_COLLECTION_NAME
+from database import milvus_client, MILVUS_COLLECTION_NAME
 
 def _collection_has_field(field_name: str) -> bool:
     try:
@@ -24,17 +24,21 @@ def keyword_search(query: str, file_name: str = None, limit: int = 7) -> List[Di
         # If file_name field exists server-side, we could in principle use expr filtering in the vectorstore query,
         # but keyword search here does a simple content substring scan (LangChain returns metadata)
         # We'll get a reasonably large k then filter:
-        docs = vs.similarity_search(query="", k=1000)
+        docs = vs.similarity_search(query="", k=100)
         query_lower = query.lower()
         results = []
         for doc in docs:
             if query_lower in doc.page_content.lower():
                 # If file_name not present in doc.metadata, default to empty string
                 results.append({
-                    "content": doc.page_content,
+                    "chunk_id": doc.metadata.get("chunk_id"),
+                    "chunk_index": doc.metadata.get("chunk_index"),
+                    "text": doc.page_content,
                     "file_name": doc.metadata.get("file_name", ""),
+                    "page": doc.metadata.get("page"),
+                    "source": doc.metadata.get("source"),
                     "score": 1.0,
-                    "search_type": "keyword"
+                    "search_type": "keyword",
                 })
                 if len(results) >= limit:
                     break
@@ -73,10 +77,20 @@ def vector_search(query: str, file_name: str = None, limit: int = 7) -> List[Dic
                 # Skip entries that don't match requested file_name
                 if meta_file != file_name:
                     continue
+
+            # Convert COSINE distance [0,2] to similarity score [0,1]
+            # where 0 distance = 1.0 similarity (identical)
+            # and 2 distance = 0.0 similarity (opposite)
+            similarity_score = 1 - (score / 2)
+
             results.append({
-                "content": doc.page_content,
+                "chunk_id": doc.metadata.get("chunk_id"),
+                "chunk_index": doc.metadata.get("chunk_index"),
+                "text": doc.page_content,
                 "file_name": meta_file,
-                "score": float(score),
+                "page": doc.metadata.get("page"),
+                "source": doc.metadata.get("source"),
+                "score": float(similarity_score),
                 "search_type": "vector"
             })
 
@@ -96,46 +110,57 @@ def hybrid_search(
     """Combine vector and keyword results with weighted scoring"""
     print(f"Combining {len(vector_results)} vector + {len(keyword_results)} keyword results")
     
-    keyword_map = {}
-    for result in keyword_results:
-        content = result["content"]
-        keyword_map[content] = result["score"]
+    # Map keyword results by chunk_id
+    keyword_map = {r["chunk_id"]: r["score"] for r in keyword_results}
     
     merged = []
-    seen_content = set()
+    seen_chunks = set()
     
+    # Merge vector results
     for vec in vector_results:
-        content = vec["content"]
-        if content in seen_content:
+        chunk_id = vec.get("chunk_id")
+        if chunk_id in seen_chunks:
             continue
-        seen_content.add(content)
-        
+        seen_chunks.add(chunk_id)
+
         vector_score = vec["score"]
-        keyword_score = keyword_map.get(content, 0)
+        keyword_score = keyword_map.get(chunk_id, 0)
         hybrid_score = (alpha * vector_score) + ((1 - alpha) * keyword_score)
         
         merged.append({
-            "content": content,
+            "chunk_id": chunk_id,
+            "chunk_index": vec.get("chunk_index"),
+            "text": vec["text"],
             "file_name": vec["file_name"],
+            "page": vec.get("page"),
+            "source": vec.get("source"),
             "vector_score": vector_score,
             "keyword_score": keyword_score,
             "hybrid_score": hybrid_score,
             "search_type": "hybrid"
         })
     
+    # Add keyword-only results
     for kw in keyword_results:
-        content = kw["content"]
-        if content not in seen_content:
-            seen_content.add(content)
-            merged.append({
-                "content": content,
-                "file_name": kw["file_name"],
-                "vector_score": 0,
-                "keyword_score": kw["score"],
-                "hybrid_score": (1 - alpha) * kw["score"],
-                "search_type": "hybrid"
-            })
+        chunk_id = kw.get("chunk_id")
+        if chunk_id in seen_chunks:
+            continue
+        seen_chunks.add(chunk_id)
+
+        merged.append({
+            "chunk_id": chunk_id,
+            "chunk_index": kw.get("chunk_index"),
+            "text": kw["text"],
+            "file_name": kw["file_name"],
+            "page": kw.get("page"),
+            "source": kw.get("source"),
+            "vector_score": 0,
+            "keyword_score": kw["score"],
+            "hybrid_score": (1 - alpha) * kw["score"],
+            "search_type": "hybrid"
+        })
     
+    # Sort by hybrid_score descending
     merged_sorted = sorted(merged, key=lambda x: x["hybrid_score"], reverse=True)
     print(f"Hybrid search returning top {min(limit, len(merged_sorted))} results")
     return merged_sorted[:limit]
