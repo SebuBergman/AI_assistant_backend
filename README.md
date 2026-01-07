@@ -122,11 +122,6 @@ docker build -t my-backend .
 docker run --env-file .env -p 8000:8000 my-backend
 ```
 
-If you made any changes to backend must copy again
-```powershell
-rsync -av --progress --exclude='.git' --exclude='.venv' /mnt/c/Users/SebastianThomasAlexa/Programming/my_project/AI_assistant_backend ~/projects/
-```
-
 ---
 
 ## 📡 API Endpoints
