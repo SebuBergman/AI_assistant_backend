@@ -1,3 +1,10 @@
+import os
+import uvicorn
+import json
+import boto3
+import spacy
+import warnings
+
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,14 +13,9 @@ from openai import OpenAI
 from anthropic import Anthropic
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
-import os
-import uvicorn
-import json
-import boto3
 
-# Your existing imports
 from email_assistant import rewrite_email_stream, EmailRequest
 from ai_assistant import ask_ai, AI_Request
 from tools import is_tool_supported
@@ -23,9 +25,13 @@ from pymilvus import MilvusClient
 from langchain_community.vectorstores import Milvus
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import SpacyTextSplitter
 
-from db import (
+# Redis & Supabase DB imports
+from database import lifespan
+from routers import chats
+
+from database import (
     QUERY_CACHE_COLLECTION,
     delete_document_embeddings,
     delete_pdf_metadata,
@@ -59,8 +65,26 @@ from chat_title import router as chat_title_router
 
 load_dotenv()
 
-# FastAPI app initialization
-app = FastAPI(title="AI Assistant API", version="1.0.0")
+# Create FastAPI app with lifespan
+app = FastAPI(
+    title="Chat API",
+    description="Chat service API with Milvus, PostgreSQL and Redis",
+    version="1.0.8",
+    lifespan=lifespan
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        # Add your production domains
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # API Keys
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -97,19 +121,16 @@ s3_client = boto3.client(
     region_name=os.getenv("AWS_REGION"),
 )
 
-# Text splitter
-text_splitter = RecursiveCharacterTextSplitter(
+# Load spaCy with only the sentencizer (faster and no warnings)
+nlp = spacy.blank("en")
+nlp.add_pipe("sentencizer")
+
+warnings.filterwarnings("ignore", message=".*W108.*")
+
+text_splitter = SpacyTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
-)
-
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    pipeline="en_core_web_sm",
 )
 
 # ============================================================================
@@ -195,17 +216,20 @@ def get_rag_context(question: str, file_name: str = "", keyword: str = "",
         # Build context from results
         context_lines = []
         for i, result in enumerate(final_results):
+            # ✅ Use .get() with fallback to handle both 'text' and 'content' fields
+            content = result.get('text') or result.get('content', '')
+            
             if search_method == "hybrid":
                 context_lines.append(
                     f"Document {i+1} (Hybrid: {result['hybrid_score']:.3f})\n"
                     f"File: {result['file_name']}\n"
-                    f"{result['content']}\n"
+                    f"{content}\n"
                 )
             else:
                 context_lines.append(
                     f"Document {i+1} (Score: {result['score']:.3f})\n"
                     f"File: {result['file_name']}\n"
-                    f"{result['content']}\n"
+                    f"{content}\n"
                 )
         
         context = "\n".join(context_lines)
@@ -221,6 +245,7 @@ def get_rag_context(question: str, file_name: str = "", keyword: str = "",
 
 # Chat endpoints (includes title generation)
 app.include_router(chat_title_router, prefix="/chat", tags=["Chat"])
+app.include_router(chats.router, prefix="/api/chats", tags=["Chats"])
 
 # ============================================================================
 # ENDPOINTS - General
@@ -243,18 +268,22 @@ def read_root():
     }
 
 @app.get("/health", tags=["General"])
-def health_check():
-    """Health check endpoint to verify connections"""
+async def health_check():
+    """Health check endpoint to verify connections and database status"""
+    from services.chat_service import ChatService
+    
     try:
         vs = get_vectorstore()
         milvus_status = "connected" if vs is not None else "disconnected"
         stats = get_milvus_collection_stats()
+        db_status = await ChatService.test_connection()
         
         return {
             "status": "healthy",
             "milvus": milvus_status,
             "collection": COLLECTION_NAME,
-            "stats": stats
+            "stats": stats,
+            "database": "connected" if db_status else "disconnected"
         }
     except Exception as e:
         return {
@@ -288,6 +317,7 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
         try:
             # Prepare the prompt
             prompt = request.prompt
+            references = []
             
             # If RAG is enabled, fetch context and augment prompt
             if request.ragEnabled:
@@ -300,6 +330,34 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                 )
                 
                 if context:
+                    # Parse context into structured references for frontend
+                    # Context format: "Document 1 (Score: 0.85)\nFile: example.pdf\nContent here...\n"
+                    context_lines = context.split('\n\n')
+                    for doc_block in context_lines:
+                        if doc_block.strip():
+                            lines = doc_block.split('\n')
+                            if len(lines) >= 3:
+                                # Extract document info
+                                doc_header = lines[0]  # "Document 1 (Score: 0.85)" or "Document 1 (Hybrid: 0.85)"
+                                file_line = lines[1]    # "File: example.pdf"
+                                content = '\n'.join(lines[2:])  # Rest is content
+                                
+                                # Parse file name
+                                file_name = file_line.replace('File: ', '').strip()
+                                
+                                # Parse score
+                                score = None
+                                if 'Score:' in doc_header:
+                                    score = doc_header.split('Score:')[1].strip().rstrip(')')
+                                elif 'Hybrid:' in doc_header:
+                                    score = doc_header.split('Hybrid:')[1].strip().rstrip(')')
+                                
+                                references.append({
+                                    'file_name': file_name,
+                                    'content': content[:500],  # Truncate for preview
+                                    'score': score
+                                })
+                    
                     # Augment the prompt with RAG context
                     prompt = f"""Use the following context to help answer the question.
                     If the context is relevant, use it. If not, answer based on your knowledge.
@@ -310,8 +368,15 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                     Question: {request.prompt}
 
                     Answer:"""
-                    # Send a metadata message about RAG being used
-                    yield f"data: {json.dumps({'metadata': {'rag_enabled': True, 'search_method': search_method}})}\n\n"
+                    
+                    # Send metadata with structured references
+                    yield f"data: {json.dumps({
+                        'metadata': {
+                            'rag_enabled': True, 
+                            'search_method': search_method,
+                            'references': references
+                        }
+                    })}\n\n"
             
             # Create a modified request with the augmented prompt
             ai_request = AI_Request(
@@ -462,11 +527,6 @@ async def upload_pdf(file: UploadFile = File(...)):
         print(f"Error in upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-from fastapi import FastAPI, HTTPException
-from typing import List, Dict, Any
-
-app = FastAPI()
-
 @app.get("/fetch_documents", tags=["RAG"])
 async def fetch_documents():
     """
@@ -488,10 +548,13 @@ async def fetch_documents():
             # 2️⃣ Fetch chunk data if vectorstore exists and has data
             if vs:
                 try:
+                    # Access the underlying Milvus client
+                    milvus_client = vs.col  # or vs.client depending on your LangChain version
+                    
                     # Use async query if your vs is AsyncMilvusClient
-                    vector_results = await vs.query(
-                        filter=f'file_id == "{doc["file_id"]}"',
-                        output_fields=["chunk_id", "chunk_index", "page", "content"]
+                    vector_results = milvus_client.query(
+                        expr=f'file_id == "{doc["file_id"]}"',
+                        output_fields=["chunk_id", "chunk_index", "page", "text"]
                     )
                     
                     for r in vector_results:
@@ -499,7 +562,7 @@ async def fetch_documents():
                             "chunk_id": r.get("chunk_id"),
                             "chunk_index": r.get("chunk_index"),
                             "page": r.get("page"),
-                            "content": r.get("content"),
+                            "content": r.get("text"),
                         })
                 except Exception as e:
                     print(f"Warning: Failed to fetch chunks for {doc['file_name']}: {e}")
@@ -799,7 +862,7 @@ def milvus_stats():
 def get_collection_schema():
     """Get the current collection schema to verify it's correct"""
     try:
-        from db import milvus_client, MILVUS_COLLECTION_NAME
+        from database import milvus_client, MILVUS_COLLECTION_NAME
         
         if MILVUS_COLLECTION_NAME not in milvus_client.list_collections():
             return {
