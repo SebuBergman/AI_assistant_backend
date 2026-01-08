@@ -51,30 +51,37 @@ async def fetch_documents():
         for doc in documents:
             # Default empty chunks
             chunks: List[Dict[str, Any]] = []
+            total_chunk_tokens = 0
+            total_chunks = 0
 
-            # 2️⃣ Fetch chunk data if vectorstore exists and has data
+            # Fetch chunk data if vectorstore exists and has data
             if vs:
                 try:
                     # Access the underlying Milvus client
-                    milvus_client = vs.col  # or vs.client depending on your LangChain version
+                    milvus_client = vs.col
                     
                     # Use async query if your vs is AsyncMilvusClient
                     vector_results = milvus_client.query(
                         expr=f'file_id == "{doc["file_id"]}"',
-                        output_fields=["chunk_id", "chunk_index", "page", "text"]
+                        output_fields=["chunk_id", "chunk_index", "page", "text", "chunk_tokens"]
                     )
                     
                     for r in vector_results:
+                        chunk_tokens = r.get("chunk_tokens") or 0
+                        total_chunk_tokens += chunk_tokens
+                        total_chunks += 1
+
                         chunks.append({
                             "chunk_id": r.get("chunk_id"),
                             "chunk_index": r.get("chunk_index"),
                             "page": r.get("page"),
                             "content": r.get("text"),
+                            "chunk_tokens": chunk_tokens,
                         })
                 except Exception as e:
                     print(f"Warning: Failed to fetch chunks for {doc['file_name']}: {e}")
 
-            # 3️⃣ Build final document object
+            # Build final document object
             results.append({
                 "file_name": doc["file_name"],
                 "file_path": doc.get("file_path") or doc.get("source"),
@@ -82,6 +89,10 @@ async def fetch_documents():
                 "file_size": doc.get("file_size", 0),
                 "file_id": doc["file_id"],
                 "chunks": chunks,
+                "metrics": {
+                    "chunks": total_chunks,
+                    "total_chunk_tokens": total_chunk_tokens
+                }
             })
 
         return {"documents": results}

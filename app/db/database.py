@@ -112,15 +112,24 @@ def build_embeddings_schema():
         auto_id=True, enable_dynamic_field=True, description="RAG document embeddings"
     )
     schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=True)
+
+    # content + embedding
     schema.add_field("text", DataType.VARCHAR, max_length=65535)
     schema.add_field("vector", DataType.FLOAT_VECTOR, dim=EMBEDDING_DIM)
+
+    # document-level metadata
     schema.add_field("file_name", DataType.VARCHAR, max_length=512)
+    schema.add_field("file_id", DataType.VARCHAR, max_length=128)
+    schema.add_field("file_size", DataType.INT64)
+    schema.add_field("upload_date", DataType.VARCHAR, max_length=32)
+    
+    # Chunk-level metadata (used by fetch_documents)
     schema.add_field("chunk_id", DataType.VARCHAR, max_length=128)
     schema.add_field("chunk_index", DataType.INT64)
     schema.add_field("page", DataType.INT64)
-    schema.add_field("file_size", DataType.INT64)
-    schema.add_field("upload_date", DataType.VARCHAR, max_length=32)
-    schema.add_field("file_id", DataType.VARCHAR, max_length=128)
+
+    # Chunk tokens
+    schema.add_field("chunk_tokens", DataType.INT64)
     return schema
 
 def build_pdf_metadata_schema():
@@ -173,7 +182,6 @@ ensure_collection_exists(
     build_query_cache_schema,
     index_fields=[("embedding", "AUTOINDEX", "COSINE")]
 )
-
 
 # PDF Metadata operations
 def insert_pdf_metadata(file_name, file_path, file_size, upload_date, file_id, chunks, embedding=None):
