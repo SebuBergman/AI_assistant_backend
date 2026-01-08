@@ -1,6 +1,6 @@
 from typing import List, Dict
-from vectorstore_manager import get_vectorstore
-from database import milvus_client, MILVUS_COLLECTION_NAME
+from app.db.vectorstore_manager import get_vectorstore
+from app.db.database import milvus_client, MILVUS_COLLECTION_NAME
 
 def _collection_has_field(field_name: str) -> bool:
     try:

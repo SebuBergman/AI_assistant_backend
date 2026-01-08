@@ -1,9 +1,10 @@
 # app/services/chat_service.py
+## Note: Not in use. Needs fixing and testing before use.
 import json
 import httpx
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from database import get_db_pool, get_redis_client, CACHE_KEYS, CACHE_TTL
+from app.db.database import get_db_pool, get_redis_client, CACHE_KEYS, CACHE_TTL
 import os
 
 class ChatService:

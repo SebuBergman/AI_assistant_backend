@@ -8,8 +8,8 @@ from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
-from data import valid_gpt_models, valid_claude_models
-from tools import LANGCHAIN_TOOLS, is_tool_supported
+from app.data.data import valid_gpt_models, valid_claude_models
+from app.tools.tools import LANGCHAIN_TOOLS, is_tool_supported
 
 class AI_Request(BaseModel):
     question: str

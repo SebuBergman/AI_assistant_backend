@@ -3,7 +3,7 @@ from tavily import TavilyClient
 from langchain_core.tools import tool
 import os
 
-from data import supports_tools
+from app.data.data import supports_tools
 
 def is_tool_supported(model_name):
     """Check if the given model supports tool usage.
