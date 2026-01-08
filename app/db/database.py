@@ -144,6 +144,7 @@ def build_pdf_metadata_schema():
     schema.add_field("chunks", DataType.INT64)
     schema.add_field("file_id", DataType.VARCHAR, max_length=128)
     schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=384)
+    schema.add_field("total_chunk_tokens", DataType.INT64)
     return schema
 
 def build_query_cache_schema():
@@ -184,7 +185,7 @@ ensure_collection_exists(
 )
 
 # PDF Metadata operations
-def insert_pdf_metadata(file_name, file_path, file_size, upload_date, file_id, chunks, embedding=None):
+def insert_pdf_metadata(file_name, file_path, file_size, upload_date, file_id, chunks, embedding=None, total_chunk_tokens=0):
     """Store PDF metadata into Milvus."""
 
     if embedding is None:
@@ -199,7 +200,8 @@ def insert_pdf_metadata(file_name, file_path, file_size, upload_date, file_id, c
             "file_size": file_size,
             "chunks": chunks,
             "file_id": file_id,
-            "embedding": embedding
+            "embedding": embedding,
+            "total_chunk_tokens": total_chunk_tokens
         }]
     )
     print(f"✓ Saved PDF metadata for {file_name}")

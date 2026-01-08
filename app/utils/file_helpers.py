@@ -1,4 +1,5 @@
 import os
+import tiktoken
 
 from datetime import datetime
 from uuid import uuid4
@@ -7,7 +8,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import Milvus
 from langchain_text_splitters import SpacyTextSplitter
 
-from app.config import UPLOAD_PATH
+from app.config import _TOKEN_ENCODER, UPLOAD_PATH
 from app.db.S3_bucket import upload_to_s3
 from app.db.database import insert_pdf_metadata
 from app.db.vectorstore_manager import COLLECTION_NAME, MILVUS_CONNECTION, get_vectorstore, embeddings
@@ -19,6 +20,11 @@ text_splitter = SpacyTextSplitter(
     chunk_overlap=200,
     pipeline="en_core_web_sm",
 )
+
+def count_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return len(_TOKEN_ENCODER.encode(text))
 
 @router.post("/upload", tags=["RAG"])
 async def upload_pdf(file: UploadFile = File(...)):
@@ -54,16 +60,23 @@ async def upload_pdf(file: UploadFile = File(...)):
                 "upload_date": upload_date,
                 "page": doc.metadata.get("page", 0) + 1,  # convert to 1-based
                 "file_id": file_id,
+                "chunk_tokens": count_tokens(doc.page_content),
             })
         
         # Split documents
         splits = text_splitter.split_documents(documents)
 
+        total_chunk_tokens = 0
+
         # Add chunk-level metadata
         for i, doc in enumerate(splits):
+            chunk_tokens = count_tokens(doc.page_content)
+            total_chunk_tokens += chunk_tokens
+
             doc.metadata.update({
                 "chunk_id": f"{file_id}_{i}",
                 "chunk_index": i,
+                "chunk_tokens": chunk_tokens,
             })
         
         # Get or initialize vectorstore
@@ -91,6 +104,7 @@ async def upload_pdf(file: UploadFile = File(...)):
             upload_date=upload_date,
             file_id=file_id,
             chunks=len(splits),
+            total_chunk_tokens=total_chunk_tokens
         )
         
         # Clean up local file
