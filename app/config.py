@@ -1,6 +1,10 @@
 import os
+import tiktoken
+
 from dotenv import load_dotenv
+from langchain_openai import OpenAIEmbeddings
 from pymilvus import MilvusClient
+
 from app.db.database import lifespan
 
 load_dotenv()
@@ -26,3 +30,7 @@ milvus_client = MilvusClient(
     uri=ZILLIZ_CLOUD_URI,
     token=ZILLIZ_CLOUD_TOKEN
 )
+
+# Initialize embeddings (text-embedding-3-small is 1536 dimensions)
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+_TOKEN_ENCODER = tiktoken.encoding_for_model("text-embedding-3-small")
