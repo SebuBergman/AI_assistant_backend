@@ -1,8 +1,10 @@
 import json
+import tiktoken
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
 from app.dependencies import openai_client, deepseek_client, anthropic_client
 from app.tools.tools import is_tool_supported
 from app.assistants.ai_assistant import ask_ai, AI_Request
@@ -89,7 +91,11 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                             'references': references
                         }
                     })}\n\n"
-            
+                    
+            encoding = tiktoken.get_encoding("cl100k_base")
+            input_tokens = len(encoding.encode(prompt)) # Count input tokens
+            output_tokens = 0
+
             # Create a modified request with the augmented prompt
             ai_request = AI_Request(
                 question=prompt,
@@ -108,6 +114,11 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
 
             # Stream the content with SSE formatting
             for chunk in stream:
+                if isinstance(chunk, str) and not chunk.startswith('{'):
+                    # Count tokens in each chunk
+                    output_tokens += len(encoding.encode(chunk))
+
+                # Stream chunks
                 if isinstance(chunk, str):
                     if chunk.startswith('{'):
                         yield f"data: {chunk}\n\n"
@@ -117,7 +128,14 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                     yield f"data: {json.dumps({'content': str(chunk)})}\n\n"
             
             # Send completion signal
-            yield f"data: {json.dumps({'done': True})}\n\n"
+            yield f"data: {json.dumps({
+                'done': True,
+                'tokens': {
+                    'input_tokens': input_tokens,
+                    'output_tokens': output_tokens,
+                    'total_tokens': input_tokens + output_tokens
+                }
+            })}\n\n"
 
         except Exception as e:
             print(f"Streaming error: {str(e)}")
@@ -135,7 +153,7 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
 @router.get("/models")
 async def list_models():
     """Get list of available AI models"""
-    from assistants.ai_assistant import MODEL_FUNCTIONS
+    from app.assistants.ai_assistant import MODEL_FUNCTIONS
     return {"models": list(MODEL_FUNCTIONS.keys())}
 
 @router.get("/tools/{model_name}")

@@ -1,7 +1,10 @@
-from langchain_milvus import Milvus
-from langchain_openai import OpenAIEmbeddings
-from dotenv import load_dotenv
 import os
+
+from langchain_milvus import Milvus
+from dotenv import load_dotenv
+
+from app.config import embeddings
+
 
 load_dotenv()
 
@@ -23,8 +26,7 @@ MILVUS_CONNECTION = {
     "secure": True
 }
 
-# Initialize embeddings (text-embedding-3-small is 1536 dimensions)
-embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
 
 # Global vectorstore instance
 vectorstore = None
