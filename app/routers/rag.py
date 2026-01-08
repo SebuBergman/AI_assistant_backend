@@ -40,7 +40,7 @@ async def fetch_documents():
     Fetch all uploaded PDFs with optional chunk data from Milvus
     """
     try:
-        # 1️⃣ Fetch PDF metadata
+        # Fetch PDF metadata
         documents = get_pdf_metadata()  # should return List[Dict]
         if not documents:
             return {"documents": []}
@@ -90,7 +90,6 @@ async def fetch_documents():
                 "file_id": doc["file_id"],
                 "chunks": chunks,
                 "metrics": {
-                    "chunks": total_chunks,
                     "total_chunk_tokens": total_chunk_tokens
                 }
             })
