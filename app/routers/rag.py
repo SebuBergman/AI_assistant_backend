@@ -184,16 +184,26 @@ async def query(request: QueryRequest):
         
         context = "\n".join(context_lines)
         
-        # Create prompt
-        prompt = f"""Use the following context to answer the question.
-        If you don't know the answer, say so. Be concise and factual.
+        # Create RAG prompt
+        prompt = f"""
+            You are a retrieval-augmented assistant. Answer the user's question using ONLY the information in the provided Context.
 
-        Context:
-        {context}
+            Rules:
+            - Use ONLY the Context to answer. Do not use prior knowledge or make assumptions.
+            - If the Context does not contain enough information to answer, say: "I don't know based on the provided context."
+            - Be concise, factual, and specific. Prefer short direct statements.
+            - Include citations, but keep them minimal (e.g., 1–3 per answer) and attach them only to the specific claims they support.
+            - Do not quote or paste large portions of the retrieved materials; summarize in your own words.
+            - Do not mention or describe the retrieved materials, “context,” “documents,” or the retrieval process.
 
-        Question: {request.question}
+            Context:
+            {context}
 
-        Answer:"""
+            Question:
+            {request.question}
+
+            Answer:
+            """.strip()
         
         # Get answer from LLM
         response = llm.invoke(prompt)

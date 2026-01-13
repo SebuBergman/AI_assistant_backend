@@ -73,15 +73,7 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                                 })
                     
                     # Augment the prompt with RAG context
-                    prompt = f"""Use the following context to help answer the question.
-                    If the context is relevant, use it. If not, answer based on your knowledge.
-
-                    Context:
-                    {context}
-
-                    Question: {request.prompt}
-
-                    Answer:"""
+                    prompt = build_rag_prompt(user_question=request.prompt, context=context)
                     
                     # Send metadata with structured references
                     yield f"data: {json.dumps({
@@ -90,7 +82,9 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                             'search_method': search_method,
                             'references': references
                         }
-                    })}\n\n"
+                    })}\n\n"     
+            else:
+                prompt = build_normal_prompt(user_question=request.prompt)
                     
             encoding = tiktoken.get_encoding("cl100k_base")
             input_tokens = len(encoding.encode(prompt)) # Count input tokens
@@ -149,6 +143,43 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
             "X-Accel-Buffering": "no",
         }
     )
+
+def build_normal_prompt(user_question: str) -> str:
+    return f"""You are a helpful assistant.
+        Answer the user's question clearly and directly.
+
+        Rules:
+        - Do not invent facts. If you don't know, say so. If something needs verification, state what you would need to confirm.
+        - Use Markdown formatting in your responses (headings, lists, code blocks, etc.) so the output renders well in react-markdown.
+        - If the question is ambiguous or missing key details, ask 1-3 brief clarifying questions.
+        - Use plain language unless the user is clearly asking for technical depth.
+
+        User question: {user_question}
+
+        Answer:
+    """.strip()
+
+
+def build_rag_prompt(user_question: str, context: str) -> str:
+    return f"""
+        You are a retrieval-augmented assistant. Answer the user's question using ONLY the information in the provided Context.
+
+        Rules:
+        - Use ONLY the Context to answer. Do not use prior knowledge or make assumptions.
+        - If the Context does not contain enough information to answer, say: "I don't know based on the provided context."
+        - Be concise, factual, and specific. Prefer short direct statements.
+        - Include citations, but keep them minimal (e.g., 1-3 per answer) and attach them only to the specific claims they support.
+        - Do not quote or paste large portions of the retrieved materials; summarize in your own words.
+        - Do not mention or describe the retrieved materials, “context,” “documents,” or the retrieval process.
+
+        Context:
+        {context}
+
+        Question:
+        {user_question}
+
+        Answer:
+    """.strip()
 
 @router.get("/models")
 async def list_models():
