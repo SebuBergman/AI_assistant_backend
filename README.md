@@ -222,5 +222,4 @@ All sensitive authentication keys go there (rename to .env to not accidentally u
 ---
 
 ## 📝 TODO
-- Improve email rewriting prompt to reduce errors
 - Add Email rewrite usage analytics

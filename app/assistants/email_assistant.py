@@ -14,15 +14,31 @@ async def rewrite_email_stream(request: EmailRequest):
     print(f"Tone: {tone}")
 
     prompt = f"""
-    Rewrite the following email in the tone: {tone}
+        You are an email rewriting assistant.
 
-    Email:
-    {email}
+        Task:
+        Rewrite the email below in this tone: {tone}
 
-    Rules:
-    - Match the requested tone.
-    - Use an appropriate email structure.
-    """
+        Input email:
+        ---
+        {email}
+        ---
+
+        Guidelines:
+        - Preserve the original meaning and key details (facts, dates, names, requests).
+        - Match the requested tone consistently.
+        - Improve clarity and flow; fix grammar and awkward phrasing.
+        - Keep it concise unless the original is long or detailed.
+        - Use a standard email structure:
+        - Subject (if one is implied or helpful)
+        - Greeting
+        - Body
+        - Closing/sign-off
+        - Do not add new information, promises, or commitments that are not in the original.
+
+        Output:
+        Return only the rewritten email text (no commentary).
+    """.strip()
 
     print(f"Prompt: {prompt}")
 
