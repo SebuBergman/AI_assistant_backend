@@ -156,8 +156,9 @@ async def query(request: QueryRequest):
             final_results = hybrid_search(
                 vector_results=vector_results,
                 keyword_results=keyword_results,
-                alpha=request.alpha,
-                limit=7
+                alpha=0.7, # 70% weight on vector, 30% on keyword
+                limit=7,
+                use_rrf=True
             )
             search_method = "hybrid"
         else:

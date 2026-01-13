@@ -1,6 +1,15 @@
+import re
+
 from typing import List, Dict
+from rank_bm25 import BM25Okapi
+
 from app.db.vectorstore_manager import get_vectorstore
 from app.db.database import milvus_client, MILVUS_COLLECTION_NAME
+
+_WORD = re.compile(r"\w+")
+
+def _tokenize(text: str) -> List[str]:
+    return _WORD.findall((text or "").lower())
 
 def _collection_has_field(field_name: str) -> bool:
     try:
@@ -15,35 +24,59 @@ def _collection_has_field(field_name: str) -> bool:
         return False
 
 def keyword_search(query: str, file_name: str = None, limit: int = 7) -> List[Dict]:
-    """Perform keyword search on documents; fallback to client-side filtering if needed."""
+    """
+        Keyword search using BM25 over a retrieved candidate set.
+        Returns normalized keyword scores in [0, 1] so hybrid mixing is stable.
+    """
     try:
         vs = get_vectorstore()
         if vs is None:
             return []
 
-        # If file_name field exists server-side, we could in principle use expr filtering in the vectorstore query,
-        # but keyword search here does a simple content substring scan (LangChain returns metadata)
-        # We'll get a reasonably large k then filter:
-        docs = vs.similarity_search(query="", k=100)
-        query_lower = query.lower()
+        # Pull a larger candidate set (tune this)
+        candidates = vs.similarity_search(query=" ", k=300)
+
+        # Optional file filter (client-side)
+        if file_name:
+            candidates = [d for d in candidates if d.metadata.get("file_name", "") == file_name]
+
+        if not candidates:
+            return []
+
+        tokenized_docs = [_tokenize(d.page_content) for d in candidates]
+        bm25 = BM25Okapi(tokenized_docs)
+
+        q_tokens = _tokenize(query)
+        raw_scores = bm25.get_scores(q_tokens)  # higher is better
+
+        # Normalize BM25 scores to [0,1] for hybrid
+        max_s = float(max(raw_scores)) if len(raw_scores) else 0.0
+        min_s = float(min(raw_scores)) if len(raw_scores) else 0.0
+        denom = (max_s - min_s) if max_s != min_s else 1.0
+        norm_scores = [(float(s) - min_s) / denom for s in raw_scores]
+
+        # Rank
+        ranked = sorted(
+            zip(candidates, norm_scores),
+            key=lambda x: x[1],
+            reverse=True
+        )[:limit]
+
         results = []
-        for doc in docs:
-            if query_lower in doc.page_content.lower():
-                # If file_name not present in doc.metadata, default to empty string
-                results.append({
-                    "chunk_id": doc.metadata.get("chunk_id"),
-                    "chunk_index": doc.metadata.get("chunk_index"),
-                    "text": doc.page_content,
-                    "file_name": doc.metadata.get("file_name", ""),
-                    "page": doc.metadata.get("page"),
-                    "source": doc.metadata.get("source"),
-                    "score": 1.0,
-                    "search_type": "keyword",
-                })
-                if len(results) >= limit:
-                    break
-        print(f"Keyword search found {len(results)} results")
+        for doc, score in ranked:
+            results.append({
+                "chunk_id": doc.metadata.get("chunk_id"),
+                "chunk_index": doc.metadata.get("chunk_index"),
+                "text": doc.page_content,
+                "file_name": doc.metadata.get("file_name", ""),
+                "page": doc.metadata.get("page"),
+                "source": doc.metadata.get("source"),
+                "score": float(score),
+                "search_type": "keyword",
+            })
+
         return results
+
     except Exception as e:
         print(f"Error in keyword search: {e}")
         return []
@@ -94,7 +127,6 @@ def vector_search(query: str, file_name: str = None, limit: int = 7) -> List[Dic
                 "search_type": "vector"
             })
 
-        print(f"Vector search found {len(results)} results (server_filter={server_side_filter})")
         return results
 
     except Exception as e:
@@ -107,60 +139,61 @@ def hybrid_search(
     alpha: float = 0.7,
     limit: int = 7
 ) -> List[Dict]:
-    """Combine vector and keyword results with weighted scoring"""
-    print(f"Combining {len(vector_results)} vector + {len(keyword_results)} keyword results")
-    
-    # Map keyword results by chunk_id
-    keyword_map = {r["chunk_id"]: r["score"] for r in keyword_results}
-    
+    """
+    Union-style hybrid search:
+    - Vector-only results keep vector score
+    - Keyword-only results keep keyword score
+    - Overlapping results get blended
+    """
+
+    vector_map = {r["chunk_id"]: r for r in vector_results}
+    keyword_map = {r["chunk_id"]: r for r in keyword_results}
+
+    all_chunk_ids = set(vector_map) | set(keyword_map)
+
     merged = []
-    seen_chunks = set()
-    
-    # Merge vector results
-    for vec in vector_results:
-        chunk_id = vec.get("chunk_id")
-        if chunk_id in seen_chunks:
-            continue
-        seen_chunks.add(chunk_id)
 
-        vector_score = vec["score"]
-        keyword_score = keyword_map.get(chunk_id, 0)
-        hybrid_score = (alpha * vector_score) + ((1 - alpha) * keyword_score)
-        
+    for chunk_id in all_chunk_ids:
+        vec = vector_map.get(chunk_id)
+        kw = keyword_map.get(chunk_id)
+
+        vector_score = vec["score"] if vec else None
+        keyword_score = kw["score"] if kw else None
+
+        # Decide hybrid score
+        if vector_score is not None and keyword_score is not None:
+            hybrid_score = (alpha * vector_score) + ((1 - alpha) * keyword_score)
+            search_type = "hybrid_both"
+        elif vector_score is not None:
+            hybrid_score = vector_score
+            search_type = "hybrid_vector_only"
+        else:
+            hybrid_score = keyword_score
+            search_type = "hybrid_keyword_only"
+
+        source = vec or kw
+
+        print(
+            f"Hybrid score for {chunk_id}: "
+            f"vector={vector_score}, keyword={keyword_score}, hybrid={hybrid_score}"
+        )
+
+        print(f"Results of RAG search - chunk_id: {chunk_id}, source: {source}")
+
         merged.append({
             "chunk_id": chunk_id,
-            "chunk_index": vec.get("chunk_index"),
-            "text": vec["text"],
-            "file_name": vec["file_name"],
-            "page": vec.get("page"),
-            "source": vec.get("source"),
-            "vector_score": vector_score,
-            "keyword_score": keyword_score,
+            "chunk_index": source.get("chunk_index"),
+            "text": source["text"],
+            "file_name": source["file_name"],
+            "page": source.get("page"),
+            "source": source.get("source"),
+            "score": hybrid_score,
+            "vector_score": vector_score or 0.0,
+            "keyword_score": keyword_score or 0.0,
             "hybrid_score": hybrid_score,
-            "search_type": "hybrid"
+            "search_type": search_type,
         })
-    
-    # Add keyword-only results
-    for kw in keyword_results:
-        chunk_id = kw.get("chunk_id")
-        if chunk_id in seen_chunks:
-            continue
-        seen_chunks.add(chunk_id)
 
-        merged.append({
-            "chunk_id": chunk_id,
-            "chunk_index": kw.get("chunk_index"),
-            "text": kw["text"],
-            "file_name": kw["file_name"],
-            "page": kw.get("page"),
-            "source": kw.get("source"),
-            "vector_score": 0,
-            "keyword_score": kw["score"],
-            "hybrid_score": (1 - alpha) * kw["score"],
-            "search_type": "hybrid"
-        })
-    
-    # Sort by hybrid_score descending
-    merged_sorted = sorted(merged, key=lambda x: x["hybrid_score"], reverse=True)
-    print(f"Hybrid search returning top {min(limit, len(merged_sorted))} results")
-    return merged_sorted[:limit]
+        print(merged)
+
+    return sorted(merged, key=lambda x: x["hybrid_score"], reverse=True)[:limit]
