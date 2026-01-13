@@ -10,9 +10,6 @@
 
 .env
 
-ai_assistant
-ai_assistant/
-
 __pycache__
 __pycache__/
 
