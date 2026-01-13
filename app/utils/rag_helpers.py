@@ -68,8 +68,11 @@ def get_rag_context(question: str, file_name: str = "", keyword: str = "",
                     f"{content}\n"
                 )
         
-        context = "\n".join(context_lines)
-        return context, search_method
+        return {
+            "context_text": "\n".join(context_lines),  # for LLM prompt
+            "documents": final_results,                # structured RAG data
+            "search_method": search_method
+        }
     
     except Exception as e:
         print(f"Error getting RAG context: {e}")

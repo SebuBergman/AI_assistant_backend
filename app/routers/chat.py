@@ -35,54 +35,42 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
             
             # If RAG is enabled, fetch context and augment prompt
             if request.ragEnabled:
-                context, search_method = get_rag_context(
+                rag_result = get_rag_context(
                     question=request.prompt,
                     file_name=request.file_name or "",
                     keyword=request.keyword or "",
                     cached=request.cached or False,
                     alpha=request.alpha or 0.7
                 )
-                
-                if context:
-                    # Parse context into structured references for frontend
-                    # Context format: "Document 1 (Score: 0.85)\nFile: example.pdf\nContent here...\n"
-                    context_lines = context.split('\n\n')
-                    for doc_block in context_lines:
-                        if doc_block.strip():
-                            lines = doc_block.split('\n')
-                            if len(lines) >= 3:
-                                # Extract document info
-                                doc_header = lines[0]  # "Document 1 (Score: 0.85)" or "Document 1 (Hybrid: 0.85)"
-                                file_line = lines[1]    # "File: example.pdf"
-                                content = '\n'.join(lines[2:])  # Rest is content
-                                
-                                # Parse file name
-                                file_name = file_line.replace('File: ', '').strip()
-                                
-                                # Parse score
-                                score = None
-                                if 'Score:' in doc_header:
-                                    score = doc_header.split('Score:')[1].strip().rstrip(')')
-                                elif 'Hybrid:' in doc_header:
-                                    score = doc_header.split('Hybrid:')[1].strip().rstrip(')')
-                                
-                                references.append({
-                                    'file_name': file_name,
-                                    'content': content[:500],  # Truncate for preview
-                                    'score': score
-                                })
-                    
-                    # Augment the prompt with RAG context
-                    prompt = build_rag_prompt(user_question=request.prompt, context=context)
-                    
-                    # Send metadata with structured references
+
+                if rag_result and rag_result.get("context_text"):
+                    # Structured references (NO string parsing)
+                    references = []
+
+                    for doc in rag_result["documents"]:
+                        references.append({
+                            "file_name": doc.get("file_name"),
+                            "content": (doc.get("text") or doc.get("content", ""))[:500],
+                            "score": (
+                                doc.get("hybrid_score")
+                                or doc.get("score")
+                            )
+                        })
+
+                    # Augment prompt for the LLM
+                    prompt = build_rag_prompt(
+                        user_question=request.prompt,
+                        context=rag_result["context_text"]
+                    )
+
+                    # Send metadata once at start of stream
                     yield f"data: {json.dumps({
                         'metadata': {
-                            'rag_enabled': True, 
-                            'search_method': search_method,
+                            'rag_enabled': True,
+                            'search_method': rag_result['search_method'],
                             'references': references
                         }
-                    })}\n\n"     
+                    })}\n\n"   
             else:
                 prompt = build_normal_prompt(user_question=request.prompt)
                     
