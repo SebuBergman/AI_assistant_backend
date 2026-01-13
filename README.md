@@ -2,15 +2,17 @@
 
 ## 📌 Overview
 This backend powers an AI-driven assistant with support for:
-- Multi-model text generation (13 LLMs including GPT-5, Claude Sonnet 4.5, DeepSeek)
+- Multi-model text generation (13 LLMs including GPT-5.2, Claude Sonnet 4.5, DeepSeek)
+- Implemented tools (2): Tavily Search and OpenWeather APIs
 - Email rewriting & generation
 - RAG with hybrid keyword + vector search
 - PDF uploading, embedding, querying, and retrieval
 - Model capabilities discovery (incl. tool support)
-- Caching utilities
 - Milvus/Zilliz statistics & schema validation
-
-Built with **FastAPI**, **Milvus**, and multiple AI provider SDKs.
+- Token usage tracking & reporting
+- Input tokens, output tokens, and total token counts are calculated and reported at the end of each full assistant run (after all prompts/steps are completed).
+- RAG transparency (context + references)
+- RAG responses include the retrieved context and/or references used by the assistant to generate its answer (e.g., quoted snippets, document titles etc.).
 
 ---
 
@@ -223,3 +225,5 @@ All sensitive authentication keys go there (rename to .env to not accidentally u
 
 ## 📝 TODO
 - Add Email rewrite usage analytics
+- Fix caching
+- Add more tools for the AI assistant to use
