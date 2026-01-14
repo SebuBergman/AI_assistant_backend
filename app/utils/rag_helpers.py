@@ -33,7 +33,7 @@ def get_rag_context(question: str, file_name: str = "", keyword: str = "",
             keyword_results = keyword_search(
                 query=keyword,
                 file_name=file_name if file_name else None,
-                limit=5
+                limit=3
             )
         
         # Combine with hybrid search
@@ -42,7 +42,7 @@ def get_rag_context(question: str, file_name: str = "", keyword: str = "",
                 vector_results=vector_results,
                 keyword_results=keyword_results,
                 alpha=alpha,
-                limit=7
+                limit=10
             )
             search_method = "hybrid"
         else:
