@@ -9,10 +9,13 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
 from app.data.data import valid_gpt_models, valid_claude_models
+from app.data.system_prompts_data import rag_system_prompt, normal_system_prompts
 from app.tools.tools import LANGCHAIN_TOOLS, is_tool_supported
 
 class AI_Request(BaseModel):
+    rag_enabled: bool = False
     question: str
+    context: str = ""
     model: str
     temperature: float = 1
     max_tokens: int = 10240
@@ -20,14 +23,28 @@ class AI_Request(BaseModel):
 # DeepSeek model functions remain the same as before
 def deepseek_chat_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: ignore
     client = kwargs.get('deepseek_client')
-    system_prompt = """
-    I want you to act as a AI assistant that answers the user's prompt in a friendly and helpful manner.
-    
-    Rules:
-    - Be as helpful as possible
-    - Create profound answers
-    - Maintain conversational tone
-    """
+
+    if request.rag_enabled:
+        system_prompt = f"""
+            {rag_system_prompt["only_context"]}
+
+            RAG context:
+            {request.context}
+
+            Question:
+            {request.question}
+
+            Answer:
+        
+        """
+    else:
+        system_prompt = f"""
+            {normal_system_prompts["default_no_tools"]}
+
+            User question: {request.question}
+
+            Answer:
+        """
     try:
         stream = client.chat.completions.create(
             model="deepseek-chat",
@@ -38,6 +55,10 @@ def deepseek_chat_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
             temperature=request.temperature,
             stream=True
         )
+
+        print(f"System prompt inside deepseek_chat_stream: {system_prompt.strip()}")
+        print(f"Temperature set to: {request.temperature}")
+        
         for chunk in stream:
             if chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
@@ -47,15 +68,28 @@ def deepseek_chat_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
 
 def deepseek_reasoner_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: ignore
     client = kwargs.get('deepseek_client')
-    system_prompt = """
-    I want you to act as a reasoning-focused AI assistant.
-    
-    Rules:
-    - Focus on step-by-step reasoning
-    - Provide thorough explanations
-    - Be precise
-    - Include logical frameworks
-    """
+
+    if request.rag_enabled:
+        system_prompt = f"""
+            {rag_system_prompt["reasoner_rag"]}
+  
+            RAG context:
+            {request.context}
+
+            Question:
+            {request.question}
+
+            Answer:
+        """
+    else:
+        system_prompt = f"""
+            {normal_system_prompts["reasoner"]}
+
+            User question: {request.question}
+
+            Answer:
+        """
+
     try:
         stream = client.chat.completions.create(
             model="deepseek-reasoner",
@@ -66,6 +100,9 @@ def deepseek_reasoner_stream(request: AI_Request, **kwargs) -> AsyncGenerator: #
             stream=True,
             temperature=request.temperature
         )
+
+        print(f"System prompt: {system_prompt.strip()}")
+        print(f"Temperature set to: {request.temperature}")
         
         for chunk in stream:
             # Handle reasoning content
@@ -104,6 +141,8 @@ def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY")
         )
         
+        print(f"Temperature set to: {request.temperature}")
+        
         # Check if this model supports tools
         supports_tools = is_tool_supported(request.model)
         
@@ -115,8 +154,27 @@ def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
             llm_with_tools = llm
             print(f"[Claude] No tool support for {request.model}")
         
-        # Initialize conversation messages
-        messages = [HumanMessage(content=request.question)]
+        # Initialize conversation messages with optional system prompt
+        messages = []
+
+        # Set system prompt based on RAG
+        if request.rag_enabled:
+            system_prompt = f"""
+                {rag_system_prompt["only_context"]}
+
+                RAG context:
+                {request.context}
+            """
+        else:
+            system_prompt = f"""
+                {normal_system_prompts["default"]}
+            """
+
+        # Add the system prompt
+        messages.append(SystemMessage(content=system_prompt))
+        
+        # Add the user's question
+        messages.append(HumanMessage(content=request.question))
         
         # Agent loop for handling tool calls
         max_iterations = 5
@@ -203,6 +261,8 @@ def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: 
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             streaming=True
         )
+
+        print(f"Temperature set to: {request.temperature}")
         
         # Check if this model supports tools
         supports_tools = is_tool_supported(request.model)
@@ -216,47 +276,43 @@ def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: 
             print(f"[GPT] No tool support for {request.model}")
         
         # System prompt for GPT models
-        system_prompt = f"""
-        You are {valid_gpt_models[request.model]}.
-        You are a highly capable, thoughtful, and precise assistant.
-        Your goal is to deeply understand the user's intent, ask clarifying questions when needed, think step-by-step through complex problems, provide clear and accurate answers, and proactively anticipate helpful follow-up information.
-        Always prioritize being truthful, nuanced, insightful, and efficient, tailoring your responses specifically to the user's needs and preferences.
-        
-        # Core Principles
-        - Provide the most useful, direct, and relevant answer possible.
-        - Ask for clarification only when absolutely necessary to proceed.
-        - State when you don’t know something or cannot perform a task.
-        - Avoid making up facts, sources, or events. No hallucinating.
-        - Never provide harmful, illegal, or dangerous instructions.
-        - Respect privacy: do not generate personal data about real people.
-        - Avoid disallowed content: hate, harassment, explicit sexual content involving minors, instructions for wrongdoing, etc.
-        - Encourage safe, legal alternatives when denying a request.
-        - Provide context, reasoning, and steps when useful.
+        if request.rag_enabled:
+            system_prompt = f"""
+                {rag_system_prompt["only_context"]}
 
-        # Interaction Style
-        - Default to a friendly, clear, direct tone.
-        - Adapt writing style to the user’s preference (technical, casual, formal, humorous, etc.).
-        - Avoid overly long or overly short answers—use the level of detail appropriate to the request.
-        - When listing steps, be structured and easy to follow.
-        - If asked for code, provide clean, minimal, correct examples.
+                RAG context:
+                {request.context}
 
-        # Knowledge & Reasoning
-        - Use reasoning explicitly when helpful but avoid exposing internal chain-of-thought.
-        - Provide answers based on reliable information.
-        - When uncertain, express uncertainty clearly.
-        - If the user requests predictions or opinions, present them as speculative, not factual.
+                Question:
+                {request.question}
 
-        # Tools
-        - Use a tool only when the user asks for something requiring it.
-        - State clearly when a tool does not support a requested capability.
-        - Never fabricate tool output.
-        """
+                Answer:
+                
+            """
+        elif request.rag_enabled == False and supports_tools == True:
+            system_prompt = f"""
+                {normal_system_prompts["default"]}
+
+                User question: {request.question}
+
+                Answer:
+            """
+        else:
+            system_prompt = f"""
+                {normal_system_prompts["default_no_tools"]}
+
+                User question: {request.question}
+
+                Answer:
+            """
         
         # Initialize conversation messages
         messages = [
             SystemMessage(content=system_prompt.strip()),
             HumanMessage(content=request.question)
         ]
+
+        print(f"System prompt: {system_prompt.strip()}")
         
         # Agent loop for handling tool calls
         max_iterations = 5
@@ -360,6 +416,7 @@ def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, 
         
         print(f"Processing streaming request with model: {request.model}")
         request.temperature = max(0.0, min(2.0, request.temperature))
+        print(f"Temperature set to: {request.temperature} in ask_ai function")
         
         # Return the generator directly for streaming
         return MODEL_FUNCTIONS[request.model](
@@ -368,6 +425,7 @@ def ask_ai(request: AI_Request, openai_client: OpenAI, deepseek_client: OpenAI, 
             deepseek_client=deepseek_client, 
             anthropic_client=anthropic_client
         )
+    
     except Exception as e:
         print(f"Error in AI streaming: {str(e)}")
         raise
