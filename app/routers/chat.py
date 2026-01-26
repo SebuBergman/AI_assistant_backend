@@ -31,6 +31,7 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
         try:
             # Prepare the prompt
             prompt = request.prompt
+            context = ""
             references = []
             
             # If RAG is enabled, fetch context and augment prompt
@@ -57,11 +58,8 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                             )
                         })
 
-                    # Augment prompt for the LLM
-                    prompt = build_rag_prompt(
-                        user_question=request.prompt,
-                        context=rag_result["context_text"]
-                    )
+                    # Set context for sending to AI_request
+                    context=rag_result["context_text"]
 
                     # Send metadata once at start of stream
                     yield f"data: {json.dumps({
@@ -70,9 +68,7 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
                             'search_method': rag_result['search_method'],
                             'references': references
                         }
-                    })}\n\n"   
-            else:
-                prompt = build_normal_prompt(user_question=request.prompt)
+                    })}\n\n"
                     
             encoding = tiktoken.get_encoding("cl100k_base")
             input_tokens = len(encoding.encode(prompt)) # Count input tokens
@@ -80,11 +76,15 @@ async def ask_ai_endpoint(request: ExtendedAI_Request):
 
             # Create a modified request with the augmented prompt
             ai_request = AI_Request(
+                rag_enabled=request.ragEnabled,
                 question=prompt,
+                context=context,
                 model=request.model,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens
             )
+
+            print(f"AI_request: {ai_request}")
             
             # Get the streaming generator from ask_ai
             stream = ask_ai(
