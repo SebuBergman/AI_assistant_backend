@@ -6,7 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import Milvus
-from langchain_text_splitters import SpacyTextSplitter
+from langchain_text_splitters import ReursiveCharacterTextSplitter
 
 from app.config import _TOKEN_ENCODER, UPLOAD_PATH
 from app.db.S3_bucket import upload_to_s3
@@ -15,10 +15,11 @@ from app.db.vectorstore_manager import COLLECTION_NAME, MILVUS_CONNECTION, get_v
 
 router = APIRouter()
 
-text_splitter = SpacyTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
-    pipeline="en_core_web_sm",
+text_splitter = ReursiveCharacterTextSplitter(
+    chunk_size=800,
+    chunk_overlap=150,
+    length_function=len,
+    is_separator_regex=False,
 )
 
 def count_tokens(text: str) -> int:
