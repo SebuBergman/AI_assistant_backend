@@ -6,7 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import Milvus
-from langchain_text_splitters import ReursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import _TOKEN_ENCODER, UPLOAD_PATH
 from app.db.S3_bucket import upload_to_s3
@@ -15,7 +15,7 @@ from app.db.vectorstore_manager import COLLECTION_NAME, MILVUS_CONNECTION, get_v
 
 router = APIRouter()
 
-text_splitter = ReursiveCharacterTextSplitter(
+text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=800,
     chunk_overlap=150,
     length_function=len,
