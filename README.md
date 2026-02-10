@@ -116,12 +116,12 @@ wsl
 Navigate to your backend inside WSL’s filesystem:
 ```powershell
 cd ~/projects/AI_assistant_backend
-docker build -t my-backend .
+docker build -t assistant_backend .
 ```
 
 ### Step 3: Run you backend
 ```powershell
-docker run --env-file .env -p 8000:8000 my-backend
+docker run --env-file .env -p 8000:8000 assistant_backend
 ```
 
 ---
