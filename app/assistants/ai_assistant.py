@@ -399,11 +399,10 @@ MODEL_FUNCTIONS = {
     "gpt-5-nano": gpt_models_stream,
     "gpt-4.1": gpt_models_stream,
     "gpt-4.1-mini": gpt_models_stream,
-    "gpt-4.1-nano": gpt_models_stream,
     "o4-mini-deep-research": gpt_models_stream,
-    "claude-sonnet-4-5": claude_models_stream,
+    "claude-sonnet-4-6": claude_models_stream,
     "claude-haiku-4-5": claude_models_stream,
-    "claude-opus-4-5": claude_models_stream,
+    "claude-opus-4-6": claude_models_stream,
     "claude-3-5-haiku-latest": claude_models_stream,
 }
 
