@@ -1,10 +1,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from app.mcp.client import mcp_client
 
 from app.utils import file_helpers
 from .routers import chat, email, rag, cache, milvus
 from .config import lifespan, APP_NAME, APP_DESCRIPTION, APP_VERSION
 from app.assistants.chat_title import router as chat_title_router
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup - connect to all MCP servers
+    await mcp_client.initialize()
+    yield
+    # Shutdown - close all MCP sessions
+    await mcp_client.shutdown()
 
 def create_app() -> FastAPI:
     app = FastAPI(

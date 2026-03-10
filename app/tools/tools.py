@@ -4,6 +4,12 @@ from langchain_core.tools import tool
 import os
 
 from app.data.data import supports_tools
+from app.mcp.client import mcp_client
+
+def get_all_tools() -> list:
+    """Merge static tools + any MCP tools."""
+    from app.mcp.client import mcp_client
+    return LANGCHAIN_TOOLS + mcp_client.get_tools()
 
 def is_tool_supported(model_name):
     """Check if the given model supports tool usage.

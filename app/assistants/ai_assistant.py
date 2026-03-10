@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, Tool
 
 from app.data.data import valid_gpt_models, valid_claude_models
 from app.data.system_prompts_data import rag_system_prompt, normal_system_prompts
-from app.tools.tools import LANGCHAIN_TOOLS, is_tool_supported
+from app.tools.tools import LANGCHAIN_TOOLS, get_all_tools, is_tool_supported
 
 class AI_Request(BaseModel):
     rag_enabled: bool = False
@@ -148,7 +148,7 @@ def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
         
         # Bind tools to the model if supported
         if supports_tools:
-            llm_with_tools = llm.bind_tools(LANGCHAIN_TOOLS)
+            llm_with_tools = llm.bind_tools(get_all_tools())
             print(f"[Claude] Tools enabled for {request.model}")
         else:
             llm_with_tools = llm
@@ -217,7 +217,7 @@ def claude_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # typ
                     
                     # Find and execute the tool
                     tool_result = None
-                    for tool_obj in LANGCHAIN_TOOLS:
+                    for tool_obj in get_all_tools():
                         if tool_obj.name == tool_name:
                             tool_result = tool_obj.invoke(tool_args)
                             break
@@ -269,7 +269,7 @@ def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: 
         
         # Bind tools to the model if supported
         if supports_tools:
-            llm_with_tools = llm.bind_tools(LANGCHAIN_TOOLS)
+            llm_with_tools = llm.bind_tools(get_all_tools())
             print(f"[GPT] Tools enabled for {request.model}")
         else:
             llm_with_tools = llm
