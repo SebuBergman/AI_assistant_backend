@@ -1,11 +1,11 @@
 valid_gpt_models = {
-  "gpt-5.2": "GPT-5.2 — state-of-the-art assistant with superior reasoning, deeper contextual understanding, and enhanced creative problem-solving for expert-level results.",
-  "gpt-5.1": "GPT-5.1 — high-performance assistant offering advanced reasoning, dependable creativity, and practical expertise for complex tasks.",
-  "gpt-5-mini": "GPT-5 Mini — Fast, efficient, and concise with solid reasoning)",
-  "gpt-5-nano": "GPT-5 Nano — Ultra-light, delivers brief 1–2 sentence answers)",
-  "gpt-4.1": "GPT-4.1 — Comprehensive answers with professional tone)",
-  "gpt-4.1-mini": "GPT-4.1 Mini — Concise but informative responses)",
-  "gpt-4o": "GPT-4o — Sophisticated, nuanced responses)",
+  "gpt-5.4": "GPT-5.4 — state-of-the-art assistant with superior reasoning, deeper contextual understanding, and enhanced creative problem-solving for expert-level results.",
+  "gpt-5.3-codex": "GPT-5.3 Codex — powerful coding assistant with advanced code generation, debugging, and multi-file project capabilities, built on the GPT-5.3 architecture.",
+  "gpt-5.2": "GPT-5.2 — high-performance assistant offering advanced reasoning, dependable creativity, and practical expertise for complex tasks.",
+  "gpt-5-mini": "GPT-5 Mini — Fast, efficient, and concise with solid reasoning. Ideal for quick answers and simple tasks.",
+  "gpt-5-nano": "GPT-5 Nano — Ultra-light, delivers brief 1–2 sentence answers. Best for very simple queries and when speed is essential.",
+  "gpt-4.1": "GPT-4.1 — Comprehensive answers with professional tone. Great for detailed explanations, creative writing, and complex reasoning.",
+  "o4-mini-deep-research": "o4 Mini Deep Research - Specialized for deep research tasks. Provides detailed, well-cited answers with a focus on accuracy and depth. Not designed for general chat or creative tasks.",
 }
 
 valid_claude_models = {
@@ -16,30 +16,30 @@ valid_claude_models = {
 }
 
 supports_tools = {
+  "gpt-5.4",
   "gpt-5.2",
-  "gpt-5.1",
+  "gpt-5.3-codex",
   "gpt-4.1",
   "gpt-4o",
-  "claude-haiku-4-5",
   "claude-opus-4-6",
+  "claude-haiku-4-5",
   "claude-3-5-haiku-latest", 
 }
 
 supports_tools_true_false = {
   "deepseek-reasoner" : "false",
   "deepseek-chat" : "false (for now)",
+  "gpt-5.4" : "true",
   "gpt-5.2" : "true",
-  "gpt-5.1" : "true",
+  "gpt-5.3-codex" : "true",
   "gpt-5-mini" : "false",
   "gpt-5-nano" : "false",
   "gpt-4.1" : "true",
-  "gpt-4.1-mini" : "false",
-  "gpt-4o" : "true",
+  "o4-mini-deep-research" : "false",
   "claude-sonnet-4-6": "false",
-  "claude-haiku-4-5": "true",
   "claude-opus-4-6": "true",
+  "claude-haiku-4-5": "true",
   "claude-3-5-haiku-latest": "true",
-  "claude-4-sonnet": "true",
 }
 
 valid_ollama_models = {

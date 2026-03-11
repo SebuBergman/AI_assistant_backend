@@ -393,16 +393,16 @@ def gpt_models_stream(request: AI_Request, **kwargs) -> AsyncGenerator: # type: 
 MODEL_FUNCTIONS = {
     "deepseek-chat": deepseek_chat_stream,
     "deepseek-reasoner": deepseek_reasoner_stream,
+    "gpt-5.4": gpt_models_stream,
     "gpt-5.2": gpt_models_stream,
-    "gpt-5.1": gpt_models_stream,
+    "gpt-5.3-codex": gpt_models_stream,
     "gpt-5-mini": gpt_models_stream,
     "gpt-5-nano": gpt_models_stream,
     "gpt-4.1": gpt_models_stream,
-    "gpt-4.1-mini": gpt_models_stream,
     "o4-mini-deep-research": gpt_models_stream,
     "claude-sonnet-4-6": claude_models_stream,
-    "claude-haiku-4-5": claude_models_stream,
     "claude-opus-4-6": claude_models_stream,
+    "claude-haiku-4-5": claude_models_stream,
     "claude-3-5-haiku-latest": claude_models_stream,
 }
 
